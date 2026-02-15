@@ -1,6 +1,9 @@
-// /api/gemini.js  (Vercel)
+// /api/gemini.js  (Groq Version for PadhaiSetu)
 
 export default async function handler(req, res) {
+  // ===============================
+  // 1. CORS
+  // ===============================
   res.setHeader("Access-Control-Allow-Origin", "*");
   res.setHeader("Access-Control-Allow-Methods", "POST, OPTIONS");
   res.setHeader("Access-Control-Allow-Headers", "Content-Type");
@@ -11,35 +14,43 @@ export default async function handler(req, res) {
   }
 
   try {
-    const API_KEY = process.env.OPENROUTER_API_KEY;
+    // ===============================
+    // 2. GROQ API KEY
+    // ===============================
+    const API_KEY = process.env.GROQ_API_KEY;
     if (!API_KEY) {
       return res.status(500).json({
         ok: false,
-        text: "Backend config error: API key missing"
+        text: "Backend config error: Missing GROQ_API_KEY"
       });
     }
 
-    const body =
-      typeof req.body === "string" ? JSON.parse(req.body) : req.body;
+    // ===============================
+    // 3. Parse Body
+    // ===============================
+    const body = typeof req.body === "string" ? JSON.parse(req.body) : req.body;
+    const { mode = "text", contents, systemInstruction } = body;
 
-    const { mode = "text", contents, systemInstruction, prompt } = body;
-
-    /* ============ IMAGE MODE ============ */
+    // ===============================
+    // 4. IMAGE MODE (still free via Pollinations)
+    // ===============================
     if (mode === "image") {
-      const imgPrompt =
-        prompt || contents?.[0]?.parts?.[0]?.text || "Educational diagram";
+      const prompt =
+        contents?.[0]?.parts?.[0]?.text || "Educational diagram";
 
       return res.status(200).json({
         ok: true,
         text: "Image generated",
         image: `https://image.pollinations.ai/prompt/${encodeURIComponent(
-          imgPrompt
+          prompt
         )}?width=1024&height=768&nologo=true`,
         audio: null
       });
     }
 
-    /* ============ TTS MODE ============ */
+    // ===============================
+    // 5. TTS MODE (Browser fallback)
+    // ===============================
     if (mode === "tts") {
       return res.status(200).json({
         ok: true,
@@ -49,7 +60,9 @@ export default async function handler(req, res) {
       });
     }
 
-    /* ============ TEXT MODE ============ */
+    // ===============================
+    // 6. TEXT / CHAT MODE
+    // ===============================
     let userText = "";
     if (Array.isArray(contents)) {
       contents.forEach(c =>
@@ -64,22 +77,35 @@ export default async function handler(req, res) {
         role: "system",
         content:
           systemInstruction?.parts?.[0]?.text ||
-          "You are PadhaiSetu, a helpful Indian education AI."
+          "You are PadhaiSetu, a helpful Indian education AI. Explain clearly, step-by-step, in simple language."
       },
-      { role: "user", content: userText || "Hello" }
+      {
+        role: "user",
+        content: userText || "Hello"
+      }
     ];
 
-    const MODEL = "deepseek/deepseek-r1:free";
+    // ===============================
+    // 7. SMART MODEL SELECTION
+    // ===============================
+    // Default → fast chat
+    let MODEL = "llama-3.1-8b-instant";
 
-    const orResponse = await fetch(
-      "https://openrouter.ai/api/v1/chat/completions",
+    // If long explanation / smart class
+    if (userText.length > 400) {
+      MODEL = "mixtral-8x7b-32768";
+    }
+
+    // ===============================
+    // 8. Call GROQ
+    // ===============================
+    const groqRes = await fetch(
+      "https://api.groq.com/openai/v1/chat/completions",
       {
         method: "POST",
         headers: {
-          Authorization: `Bearer ${API_KEY}`,
-          "Content-Type": "application/json",
-          "HTTP-Referer": "https://padhaisetu.app",
-          "X-Title": "PadhaiSetu"
+          "Authorization": `Bearer ${API_KEY}`,
+          "Content-Type": "application/json"
         },
         body: JSON.stringify({
           model: MODEL,
@@ -89,28 +115,22 @@ export default async function handler(req, res) {
       }
     );
 
-    const data = await orResponse.json();
-
-    // 🔒 STRONG VALIDATION (MAIN FIX)
-    if (!data?.choices || !data.choices[0]?.message?.content) {
-      return res.status(200).json({
-        ok: false,
-        text: "⚠️ AI is busy or rate-limited. Please retry in a moment."
-      });
-    }
+    const data = await groqRes.json();
 
     return res.status(200).json({
       ok: true,
-      text: data.choices[0].message.content.trim(),
+      text:
+        data?.choices?.[0]?.message?.content ||
+        "⚠️ AI did not return a valid response.",
       image: null,
       audio: null
     });
 
   } catch (err) {
-    console.error("Backend Error:", err);
+    console.error("Groq Backend Error:", err);
     return res.status(200).json({
       ok: false,
-      text: "Temporary server issue. Please retry."
+      text: "AI is busy right now. Please retry in a moment."
     });
   }
-        }
+}
