@@ -1,5 +1,3 @@
-import fetch from "node-fetch";
-
 export default async function handler(req, res) {
   // ===============================
   // 1. CORS
@@ -18,7 +16,7 @@ export default async function handler(req, res) {
 
   try {
     // ===============================
-    // 2. API KEY (SiliconFlow / HuggingFace)
+    // 2. API KEY (SiliconFlow / HF)
     // ===============================
     const API_KEY =
       process.env.SILICONFLOW_API_KEY ||
@@ -45,12 +43,9 @@ export default async function handler(req, res) {
     }
 
     // ===============================
-    // 4. MODEL (FAST + POWERFUL + FREE)
+    // 4. MODEL (Handled Server-side)
     // ===============================
     const MODEL = "deepseek-ai/DeepSeek-V3";
-    // alternatives:
-    // mistralai/Mixtral-8x7B-Instruct
-    // meta-llama/Meta-Llama-3-70B-Instruct
 
     // ===============================
     // 5. API CALL (OpenAI compatible)
@@ -74,7 +69,7 @@ export default async function handler(req, res) {
     const data = await response.json();
 
     // ===============================
-    // 6. SAFE RESPONSE HANDLING
+    // 6. SAFE RESPONSE
     // ===============================
     if (data?.choices?.[0]?.message?.content) {
       return res.status(200).json({
@@ -83,7 +78,7 @@ export default async function handler(req, res) {
     }
 
     // ===============================
-    // 7. FINAL FALLBACK (Never undefined)
+    // 7. FALLBACK (Never undefined)
     // ===============================
     console.error("Unknown AI response:", data);
     return res.status(200).json({
