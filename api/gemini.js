@@ -24,7 +24,7 @@ export default async function handler(req, res) {
 
     const { mode = "text", contents, systemInstruction, prompt } = body;
 
-    /* ================= IMAGE MODE ================= */
+    /* ============ IMAGE MODE ============ */
     if (mode === "image") {
       const imgPrompt =
         prompt || contents?.[0]?.parts?.[0]?.text || "Educational diagram";
@@ -39,9 +39,8 @@ export default async function handler(req, res) {
       });
     }
 
-    /* ================= TTS MODE ================= */
+    /* ============ TTS MODE ============ */
     if (mode === "tts") {
-      // Frontend already uses browser speechSynthesis
       return res.status(200).json({
         ok: true,
         text: "Using browser TTS",
@@ -50,7 +49,7 @@ export default async function handler(req, res) {
       });
     }
 
-    /* ================= TEXT / CHAT MODE ================= */
+    /* ============ TEXT MODE ============ */
     let userText = "";
     if (Array.isArray(contents)) {
       contents.forEach(c =>
@@ -67,13 +66,9 @@ export default async function handler(req, res) {
           systemInstruction?.parts?.[0]?.text ||
           "You are PadhaiSetu, a helpful Indian education AI."
       },
-      {
-        role: "user",
-        content: userText || "Hello"
-      }
+      { role: "user", content: userText || "Hello" }
     ];
 
-    // ✅ FREE + POWERFUL MODEL
     const MODEL = "deepseek/deepseek-r1:free";
 
     const orResponse = await fetch(
@@ -96,11 +91,17 @@ export default async function handler(req, res) {
 
     const data = await orResponse.json();
 
+    // 🔒 STRONG VALIDATION (MAIN FIX)
+    if (!data?.choices || !data.choices[0]?.message?.content) {
+      return res.status(200).json({
+        ok: false,
+        text: "⚠️ AI is busy or rate-limited. Please retry in a moment."
+      });
+    }
+
     return res.status(200).json({
       ok: true,
-      text:
-        data?.choices?.[0]?.message?.content ||
-        "⚠️ AI did not return a valid response. Please retry.",
+      text: data.choices[0].message.content.trim(),
       image: null,
       audio: null
     });
@@ -112,4 +113,4 @@ export default async function handler(req, res) {
       text: "Temporary server issue. Please retry."
     });
   }
-}
+        }
