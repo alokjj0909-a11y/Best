@@ -1,9 +1,6 @@
-// /api/gemini.js  (Vercel Serverless)
+// /api/gemini.js  (Vercel)
 
 export default async function handler(req, res) {
-  // -------------------------------
-  // 1. CORS
-  // -------------------------------
   res.setHeader("Access-Control-Allow-Origin", "*");
   res.setHeader("Access-Control-Allow-Methods", "POST, OPTIONS");
   res.setHeader("Access-Control-Allow-Headers", "Content-Type");
@@ -14,26 +11,18 @@ export default async function handler(req, res) {
   }
 
   try {
-    // -------------------------------
-    // 2. GEMINI API KEY
-    // -------------------------------
     const API_KEY = process.env.GEMINI_API_KEY;
     if (!API_KEY) {
       return res.status(500).json({
         ok: false,
-        text: "GEMINI_API_KEY missing in environment variables"
+        text: "GEMINI_API_KEY missing"
       });
     }
 
-    // -------------------------------
-    // 3. REQUEST BODY
-    // -------------------------------
     const body = typeof req.body === "string" ? JSON.parse(req.body) : req.body;
     const { mode = "text", contents, systemInstruction, prompt } = body || {};
 
-    // -------------------------------
-    // 4. IMAGE MODE (NO Gemini image API – safe fallback)
-    // -------------------------------
+    /* ---------- IMAGE MODE (fallback) ---------- */
     if (mode === "image") {
       const imgPrompt =
         prompt || contents?.[0]?.parts?.[0]?.text || "Educational diagram";
@@ -48,9 +37,7 @@ export default async function handler(req, res) {
       });
     }
 
-    // -------------------------------
-    // 5. TTS MODE (Browser fallback)
-    // -------------------------------
+    /* ---------- TTS MODE ---------- */
     if (mode === "tts") {
       return res.status(200).json({
         ok: true,
@@ -60,27 +47,31 @@ export default async function handler(req, res) {
       });
     }
 
-    // -------------------------------
-    // 6. TEXT / CHAT MODE (Gemini 1.5 Flash)
-    // -------------------------------
-    const messages = [];
+    /* ---------- TEXT / CHAT MODE ---------- */
 
+    // ✅ SAFE CONTENTS
+    const safeContents =
+      Array.isArray(contents) && contents.length
+        ? contents
+        : [
+            {
+              role: "user",
+              parts: [{ text: "Hello" }]
+            }
+          ];
+
+    const payload = {
+      contents: safeContents,
+      generationConfig: {
+        temperature: 0.7
+      }
+    };
+
+    // ✅ PROPER systemInstruction
     if (systemInstruction?.parts?.[0]?.text) {
-      messages.push({
-        role: "user",
+      payload.systemInstruction = {
         parts: [{ text: systemInstruction.parts[0].text }]
-      });
-    }
-
-    if (Array.isArray(contents)) {
-      contents.forEach(c => {
-        if (c.parts) {
-          messages.push({
-            role: c.role || "user",
-            parts: c.parts
-          });
-        }
-      });
+      };
     }
 
     const response = await fetch(
@@ -88,33 +79,27 @@ export default async function handler(req, res) {
       {
         method: "POST",
         headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({
-          contents: messages,
-          generationConfig: {
-            temperature: 0.7
-          }
-        })
+        body: JSON.stringify(payload)
       }
     );
 
     const data = await response.json();
 
     const text =
-      data?.candidates?.[0]?.content?.parts?.[0]?.text ||
-      "⚠️ AI did not return a valid response.";
+      data?.candidates?.[0]?.content?.parts?.[0]?.text?.trim();
 
     return res.status(200).json({
       ok: true,
-      text,
+      text: text || "⚠️ AI busy hai. Thodi der baad try karo.",
       image: null,
       audio: null
     });
 
   } catch (err) {
-    console.error("Gemini Backend Error:", err);
+    console.error("Gemini Error:", err);
     return res.status(200).json({
       ok: false,
       text: "Temporary server issue. Please retry."
     });
   }
-        }
+}
