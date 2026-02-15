@@ -16,13 +16,13 @@ export default async function handler(req, res) {
 
   try {
     // ===============================
-    // 2. API KEY (OpenRouter)
+    // 2. OPENROUTER API KEY
     // ===============================
     const API_KEY = process.env.OPENROUTER_API_KEY;
 
     if (!API_KEY) {
       return res.status(500).json({
-        error: "OpenRouter API key missing",
+        error: "OPENROUTER_API_KEY missing",
       });
     }
 
@@ -32,7 +32,7 @@ export default async function handler(req, res) {
     const body =
       typeof req.body === "string" ? JSON.parse(req.body) : req.body;
 
-    const { messages, feature } = body;
+    const { messages } = body;
 
     if (!Array.isArray(messages)) {
       return res.status(400).json({
@@ -41,14 +41,12 @@ export default async function handler(req, res) {
     }
 
     // ===============================
-    // 4. MODEL SELECTION (FREE)
+    // 4. POWERFUL FREE MODEL (OpenRouter)
     // ===============================
-    function getModel(feature) {
-      if (feature === "swadhyay") return "deepseek/deepseek-r1:free";
-      return "gpt-4o-mini";
-    }
-
-    const MODEL = getModel(feature);
+    const MODEL = "deepseek/deepseek-chat"; 
+    // Alternatives (free / near-free):
+    // mistralai/mixtral-8x7b-instruct
+    // meta-llama/llama-3-70b-instruct
 
     // ===============================
     // 5. OPENROUTER API CALL
@@ -60,8 +58,8 @@ export default async function handler(req, res) {
         headers: {
           "Authorization": `Bearer ${API_KEY}`,
           "Content-Type": "application/json",
-          "HTTP-Referer": "https://padhaisetu.vercel.app",
-          "X-Title": "PadhaaiSetu",
+          "HTTP-Referer": "https://padhaisetu.app", // optional
+          "X-Title": "PadhaiSetu",
         },
         body: JSON.stringify({
           model: MODEL,
@@ -74,7 +72,7 @@ export default async function handler(req, res) {
     const data = await response.json();
 
     // ===============================
-    // 6. SAFE RESPONSE
+    // 6. SAFE RESPONSE (NEVER UNDEFINED)
     // ===============================
     if (data?.choices?.[0]?.message?.content) {
       return res.status(200).json({
@@ -82,8 +80,10 @@ export default async function handler(req, res) {
       });
     }
 
+    // ===============================
+    // 7. FINAL FALLBACK
+    // ===============================
     console.error("Unknown AI response:", data);
-
     return res.status(200).json({
       text: "माफ कीजिए, अभी सिस्टम व्यस्त है। कृपया थोड़ी देर बाद प्रयास करें 🙏",
     });
@@ -94,4 +94,4 @@ export default async function handler(req, res) {
       error: "Internal Server Error",
     });
   }
-        }
+}
