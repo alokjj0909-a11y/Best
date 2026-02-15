@@ -1,3 +1,5 @@
+import fetch from "node-fetch";
+
 export default async function handler(req, res) {
   // ===============================
   // 1. CORS
@@ -16,10 +18,11 @@ export default async function handler(req, res) {
 
   try {
     // ===============================
-    // 2. API KEY (SiliconFlow / HF)
+    // 2. API KEY (SiliconFlow / HuggingFace)
     // ===============================
     const API_KEY =
-      process.env.SILICONFLOW_API_KEY || process.env.HUGGINGFACE_API_KEY;
+      process.env.SILICONFLOW_API_KEY ||
+      process.env.HUGGINGFACE_API_KEY;
 
     if (!API_KEY) {
       return res.status(500).json({
@@ -36,19 +39,21 @@ export default async function handler(req, res) {
     const { messages } = body;
 
     if (!messages || !Array.isArray(messages)) {
-      return res.status(400).json({ error: "Invalid messages format" });
+      return res.status(400).json({
+        error: "Invalid messages format",
+      });
     }
 
     // ===============================
     // 4. MODEL (FAST + POWERFUL + FREE)
     // ===============================
-    const MODEL = "deepseek-ai/DeepSeek-V3"; 
-    // Alternatives (agar chaho):
+    const MODEL = "deepseek-ai/DeepSeek-V3";
+    // alternatives:
     // mistralai/Mixtral-8x7B-Instruct
     // meta-llama/Meta-Llama-3-70B-Instruct
 
     // ===============================
-    // 5. API CALL (OpenAI-compatible)
+    // 5. API CALL (OpenAI compatible)
     // ===============================
     const response = await fetch(
       "https://api.siliconflow.cn/v1/chat/completions",
@@ -78,7 +83,7 @@ export default async function handler(req, res) {
     }
 
     // ===============================
-    // 7. FALLBACK (Never undefined)
+    // 7. FINAL FALLBACK (Never undefined)
     // ===============================
     console.error("Unknown AI response:", data);
     return res.status(200).json({
