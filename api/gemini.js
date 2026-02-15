@@ -29,48 +29,33 @@ export default async function handler(req, res) {
     }
 
     // ===============================
-    // 3. PARSE BODY SAFELY
+    // 3. REQUEST BODY
     // ===============================
     const body =
       typeof req.body === "string" ? JSON.parse(req.body) : req.body;
 
-    let messages = [];
+    const { messages } = body;
 
-    // ✅ CASE 1: Frontend sends OpenAI-style messages
-    if (Array.isArray(body.messages)) {
-      messages = body.messages;
-    }
-
-    // ✅ CASE 2: Frontend sends Gemini-style contents
-    else if (Array.isArray(body.contents)) {
-      messages = body.contents.map((c) => ({
-        role: "user",
-        content:
-          c.parts?.map((p) => p.text || "").join(" ") || "",
-      }));
-    }
-
-    // ❌ INVALID
-    else {
+    if (!Array.isArray(messages)) {
       return res.status(400).json({
-        error: "Invalid request format",
+        error: "Invalid messages format",
       });
     }
 
     // ===============================
-    // 4. MODEL
+    // 4. MODEL (SERVER SIDE ONLY)
     // ===============================
     const MODEL = "deepseek-ai/DeepSeek-V3";
 
     // ===============================
-    // 5. API CALL
+    // 5. AI API CALL
     // ===============================
     const response = await fetch(
       "https://api.siliconflow.cn/v1/chat/completions",
       {
         method: "POST",
         headers: {
-          Authorization: `Bearer ${API_KEY}`,
+          "Authorization": `Bearer ${API_KEY}`,
           "Content-Type": "application/json",
         },
         body: JSON.stringify({
@@ -84,16 +69,31 @@ export default async function handler(req, res) {
     const data = await response.json();
 
     // ===============================
-    // 6. SUCCESS
+    // 6. SAFE RESPONSE PARSING
     // ===============================
+    let text = null;
+
+    // OpenAI compatible
     if (data?.choices?.[0]?.message?.content) {
-      return res.status(200).json({
-        text: data.choices[0].message.content.trim(),
-      });
+      text = data.choices[0].message.content;
+    }
+
+    // Streaming / delta style
+    else if (data?.choices?.[0]?.delta?.content) {
+      text = data.choices[0].delta.content;
+    }
+
+    // Some SiliconFlow models
+    else if (data?.output_text) {
+      text = data.output_text;
+    }
+
+    if (text) {
+      return res.status(200).json({ text: text.trim() });
     }
 
     // ===============================
-    // 7. FALLBACK
+    // 7. FINAL FALLBACK (NEVER FAIL)
     // ===============================
     console.error("Unknown AI response:", data);
     return res.status(200).json({
@@ -106,4 +106,4 @@ export default async function handler(req, res) {
       error: "Internal Server Error",
     });
   }
-      }
+            }
