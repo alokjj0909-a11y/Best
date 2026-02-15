@@ -1,4 +1,4 @@
-// /api/gemini.js  (Vercel)
+// /api/gemini.js  (Vercel - Azure OpenAI GPT-4.1)
 
 export default async function handler(req, res) {
   res.setHeader("Access-Control-Allow-Origin", "*");
@@ -11,18 +11,20 @@ export default async function handler(req, res) {
   }
 
   try {
-    const API_KEY = process.env.GEMINI_API_KEY;
-    if (!API_KEY) {
+    const API_KEY = process.env.AZURE_OPENAI_API_KEY;
+    const ENDPOINT = process.env.AZURE_OPENAI_ENDPOINT;
+
+    if (!API_KEY || !ENDPOINT) {
       return res.status(500).json({
         ok: false,
-        text: "GEMINI_API_KEY missing"
+        text: "Backend config error: Missing Azure OpenAI credentials"
       });
     }
 
     const body = typeof req.body === "string" ? JSON.parse(req.body) : req.body;
-    const { mode = "text", contents, systemInstruction, prompt } = body || {};
+    const { mode = "text", contents, systemInstruction, prompt } = body;
 
-    /* ---------- IMAGE MODE (fallback) ---------- */
+    /* ================= IMAGE MODE (FREE FALLBACK) ================= */
     if (mode === "image") {
       const imgPrompt =
         prompt || contents?.[0]?.parts?.[0]?.text || "Educational diagram";
@@ -37,7 +39,7 @@ export default async function handler(req, res) {
       });
     }
 
-    /* ---------- TTS MODE ---------- */
+    /* ================= TTS MODE ================= */
     if (mode === "tts") {
       return res.status(200).json({
         ok: true,
@@ -47,59 +49,62 @@ export default async function handler(req, res) {
       });
     }
 
-    /* ---------- TEXT / CHAT MODE ---------- */
+    /* ================= TEXT / CHAT MODE ================= */
 
-    // ✅ SAFE CONTENTS
-    const safeContents =
-      Array.isArray(contents) && contents.length
-        ? contents
-        : [
-            {
-              role: "user",
-              parts: [{ text: "Hello" }]
-            }
-          ];
-
-    const payload = {
-      contents: safeContents,
-      generationConfig: {
-        temperature: 0.7
-      }
-    };
-
-    // ✅ PROPER systemInstruction
-    if (systemInstruction?.parts?.[0]?.text) {
-      payload.systemInstruction = {
-        parts: [{ text: systemInstruction.parts[0].text }]
-      };
+    let userText = "";
+    if (Array.isArray(contents)) {
+      contents.forEach(c =>
+        c.parts?.forEach(p => {
+          if (p.text) userText += p.text + "\n";
+        })
+      );
     }
 
+    const messages = [
+      {
+        role: "system",
+        content:
+          systemInstruction?.parts?.[0]?.text ||
+          "You are PadhaiSetu, a helpful Indian education AI. Respond clearly, politely, and in simple language."
+      },
+      {
+        role: "user",
+        content: userText || "Hello"
+      }
+    ];
+
     const response = await fetch(
-      `https://generativelanguage.googleapis.com/v1beta/models/gemini-1.5-flash:generateContent?key=${API_KEY}`,
+      `${ENDPOINT}/openai/deployments/gpt-4.1/chat/completions?api-version=2024-02-15-preview`,
       {
         method: "POST",
-        headers: { "Content-Type": "application/json" },
-        body: JSON.stringify(payload)
+        headers: {
+          "Content-Type": "application/json",
+          "api-key": API_KEY
+        },
+        body: JSON.stringify({
+          messages,
+          temperature: 0.6,
+          max_tokens: 800
+        })
       }
     );
 
     const data = await response.json();
 
-    const text =
-      data?.candidates?.[0]?.content?.parts?.[0]?.text?.trim();
-
     return res.status(200).json({
       ok: true,
-      text: text || "⚠️ AI busy hai. Thodi der baad try karo.",
+      text:
+        data?.choices?.[0]?.message?.content ||
+        "⚠️ AI did not return a valid response.",
       image: null,
       audio: null
     });
 
   } catch (err) {
-    console.error("Gemini Error:", err);
+    console.error("Azure OpenAI Error:", err);
     return res.status(200).json({
       ok: false,
-      text: "Temporary server issue. Please retry."
+      text: "AI busy hai. Thodi der baad try karo."
     });
   }
 }
