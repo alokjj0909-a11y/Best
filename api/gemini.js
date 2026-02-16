@@ -1,82 +1,66 @@
-// api/gemini.js - HYBRID FREE VERSION
-// Chat: SambaNova (Llama 3.1) | Images: Pollinations.ai (Flux)
+// api/gemini.js - FINAL HYBRID VERSION (SambaNova + Pollinations)
 
 export default async function handler(req, res) {
-  // CORS Headers
+  // 🔥 1. CORS HEADERS (Zaroori hai taaki 'Network Error' na aaye)
   res.setHeader('Access-Control-Allow-Origin', '*');
-  res.setHeader('Access-Control-Allow-Headers', 'Content-Type, Authorization');
   res.setHeader('Access-Control-Allow-Methods', 'POST, OPTIONS');
+  res.setHeader('Access-Control-Allow-Headers', 'Content-Type');
 
-  if (req.method === 'OPTIONS') return res.status(200).end();
+  // Handle Preflight Request (Browser check karta hai server zinda hai ya nahi)
+  if (req.method === 'OPTIONS') {
+    return res.status(200).end();
+  }
 
-  try {
-    const { mode, contents, prompt, systemInstruction } = req.body;
+  // Only allow POST requests
+  if (req.method !== 'POST') {
+    return res.status(405).json({ error: 'Method Not Allowed' });
+  }
 
-    // ==========================================
-    // 🎨 MODE: IMAGE GENERATION (Pollinations AI)
-    // ==========================================
-    // Iske liye kisi API Key ki zarurat nahi hai!
-    if (mode === 'image') {
-      const finalPrompt = prompt || "Educational diagram";
-      // Pollinations URL generate karte hain (Random seed ke sath taki har baar nayi image aaye)
-      const seed = Math.floor(Math.random() * 1000000);
-      const imageUrl = `https://image.pollinations.ai/prompt/${encodeURIComponent(finalPrompt)}?width=1024&height=1024&seed=${seed}&model=flux&nologo=true`;
-      
-      // Seedha URL bhej rahe hain (Frontend ise dikha dega)
-      return res.status(200).json({ image: imageUrl });
-    }
+  const { mode, contents, systemInstruction, prompt } = req.body;
 
-    // ==========================================
-    // 🎤 MODE: TTS (Audio Fallback)
-    // ==========================================
-    else if (mode === 'tts') {
-        // SambaNova TTS support nahi karta, isliye Browser Voice use karenge
-        return res.status(400).json({ error: "Use Browser TTS" });
-    }
-
-    // ==========================================
-    // 💬 MODE: TEXT & VISION (SambaNova)
-    // ==========================================
-    else {
+  // --- 2. TEXT MODE (SambaNova - Llama 3.1) ---
+  if (mode === 'text') {
+    try {
       const apiKey = process.env.SAMBANOVA_KEY;
-      if (!apiKey) return res.status(500).json({ error: "Server Error: SAMBANOVA_KEY missing" });
-
-      // 1. Data Prepare karo
-      let userText = "";
-      let messages = [];
-
-      // System Prompt (Agar hai)
-      if (systemInstruction?.parts?.[0]?.text) {
-          messages.push({ role: "system", content: systemInstruction.parts[0].text });
-      } else {
-          messages.push({ role: "system", content: "You are PadhaiSetu, a helpful teacher." });
+      
+      if (!apiKey) {
+        return res.status(500).json({ error: 'Server Config Error: Missing SAMBANOVA_KEY' });
       }
 
-      // User Input Process karo
-      const parts = contents?.[0]?.parts || [];
-      parts.forEach(p => {
-          if (p.text) userText += p.text + " ";
-      });
+      // A. Extract System Prompt from Frontend
+      let systemPrompt = "You are a helpful assistant.";
+      if (systemInstruction && systemInstruction.parts && systemInstruction.parts[0]) {
+        systemPrompt = systemInstruction.parts[0].text;
+      }
 
-      // Vision Support (Agar image hai) - Note: SambaNova Vision Model alag hai
-      // Abhi ke liye hum Text-Only Model use karenge jo sabse stable hai.
-      // Vision ke liye hum "Llama-3.2-11B-Vision-Instruct" try kar sakte hain par wo complex hai.
-      // Student project ke liye Text Model best hai.
-      
-      messages.push({ role: "user", content: userText || "Hello" });
+      // B. Extract User Message (Parsing Google Format)
+      let userMessage = "";
+      if (contents && contents[0] && contents[0].parts) {
+         userMessage = contents[0].parts
+            .filter(part => part.text)
+            .map(part => part.text)
+            .join('\n');
+      }
 
-      // 2. Call SambaNova API
-      const response = await fetch('https://api.sambanova.ai/v1/chat/completions', {
-        method: 'POST',
+      if (!userMessage) {
+        return res.status(400).json({ error: 'No text content provided.' });
+      }
+
+      // C. Call SambaNova API
+      const response = await fetch("https://api.sambanova.ai/v1/chat/completions", {
+        method: "POST",
         headers: {
-          'Authorization': `Bearer ${apiKey}`,
-          'Content-Type': 'application/json'
+          "Authorization": `Bearer ${apiKey}`,
+          "Content-Type": "application/json"
         },
         body: JSON.stringify({
-          model: "Meta-Llama-3.1-8B-Instruct", // Super Fast & Free
-          messages: messages,
+          model: "Meta-Llama-3.1-8B-Instruct", // Fast & Free
+          messages: [
+            { role: "system", content: systemPrompt },
+            { role: "user", content: userMessage }
+          ],
           temperature: 0.7,
-          max_tokens: 1000
+          top_p: 0.9
         })
       });
 
@@ -84,20 +68,47 @@ export default async function handler(req, res) {
 
       if (!response.ok) {
         console.error("SambaNova Error:", data);
-        return res.status(200).json({ error: "AI Error: " + (data.error?.message || "Unknown") });
+        return res.status(500).json({ error: "AI Busy. Please try again." });
       }
 
-      const aiText = data.choices?.[0]?.message?.content;
+      const replyText = data.choices?.[0]?.message?.content || "No response.";
+      
+      return res.status(200).json({ text: replyText });
 
-      if (aiText) {
-        return res.status(200).json({ text: aiText });
-      } else {
-        return res.status(200).json({ error: "No response from AI" });
-      }
+    } catch (error) {
+      console.error("Backend Text Error:", error);
+      return res.status(500).json({ error: "Internal Server Error" });
     }
-
-  } catch (error) {
-    console.error("Backend Error:", error);
-    return res.status(500).json({ error: "Server Error: " + error.message });
   }
-}
+
+  // --- 3. IMAGE MODE (Pollinations AI - Free) ---
+  if (mode === 'image') {
+    try {
+      if (!prompt) {
+        return res.status(400).json({ error: "Prompt required for image generation" });
+      }
+
+      // Encode prompt for URL
+      const encodedPrompt = encodeURIComponent(prompt);
+      
+      // Random seed taaki har baar nayi image bane
+      const randomSeed = Math.floor(Math.random() * 1000);
+      const imageUrl = `https://image.pollinations.ai/prompt/${encodedPrompt}?nologo=true&seed=${randomSeed}&width=1024&height=1024&model=flux`;
+
+      // Return URL directly
+      return res.status(200).json({ image: imageUrl });
+
+    } catch (error) {
+       console.error("Backend Image Error:", error);
+       return res.status(500).json({ error: "Image Generation Failed" });
+    }
+  }
+
+  // --- 4. TTS MODE (Fallback) ---
+  if (mode === 'tts') {
+     // Frontend ko signal do ki Browser ki awaaz use kare (Free & Fast)
+     return res.status(200).json({ error: "TTS_FALLBACK" });
+  }
+
+  return res.status(400).json({ error: 'Invalid mode' });
+        }
