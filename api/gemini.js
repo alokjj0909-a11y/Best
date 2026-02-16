@@ -1,32 +1,40 @@
-// gemini.js (Groq backend – FINAL FIXED)
+// gemini.js — FINAL, GROQ SAFE VERSION
 
 const GROQ_API_KEY = process.env.GROQ_API_KEY;
 
 export async function callBackendAI({ mode = "text", contents }) {
   if (!GROQ_API_KEY) {
-    throw new Error("Missing GROQ_API_KEY");
+    return "Server config error: API key missing";
   }
 
-  // ✅ FIX: contents ko safe string banana
+  // ✅ STEP 1: contents ko PURE STRING banana (VERY IMPORTANT)
   let userText = "";
 
-  if (typeof contents === "string") {
-    userText = contents;
-  } else if (Array.isArray(contents)) {
-    userText =
-      contents
-        .map(c => c?.parts?.[0]?.text)
-        .filter(Boolean)
-        .join("\n") || "";
-  } else {
+  try {
+    if (typeof contents === "string") {
+      userText = contents;
+    } else if (Array.isArray(contents)) {
+      userText = contents
+        .map(item => item?.parts?.[0]?.text || "")
+        .join("\n")
+        .trim();
+    } else {
+      userText = "";
+    }
+  } catch {
     userText = "";
   }
 
+  if (!userText) {
+    return "Kuch likho pehle 🙂";
+  }
+
+  // ✅ STEP 2: Groq-compatible messages
   const messages = [
     {
       role: "system",
       content:
-        "You are Badi Didi, a caring Indian tutor. Answer clearly, kindly, and simply."
+        "You are Badi Didi, a caring Indian tutor. Answer kindly, clearly and in simple Hinglish/Hindi."
     },
     {
       role: "user",
@@ -34,8 +42,9 @@ export async function callBackendAI({ mode = "text", contents }) {
     }
   ];
 
+  // ✅ STEP 3: EXACT Groq payload
   const payload = {
-    model: "llama-3.3-70b-versatile", // ✅ BEST & STABLE
+    model: "llama-3.3-70b-versatile",
     messages,
     temperature: 0.7,
     max_tokens: 800
@@ -54,10 +63,16 @@ export async function callBackendAI({ mode = "text", contents }) {
       }
     );
 
+    if (!res.ok) {
+      const t = await res.text();
+      console.error("Groq HTTP error:", t);
+      return "AI thodi busy hai, thodi der baad try karo 🙏";
+    }
+
     const data = await res.json();
-    return data?.choices?.[0]?.message?.content || "AI thodi busy hai 🙏";
+    return data?.choices?.[0]?.message?.content || "AI reply empty aaya 😅";
   } catch (err) {
-    console.error("Groq Error:", err);
-    return "AI thodi busy hai. Thodi der baad try karo 🙏";
+    console.error("Groq fetch error:", err);
+    return "Network ya server issue hai 🙏";
   }
       }
