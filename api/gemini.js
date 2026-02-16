@@ -1,4 +1,4 @@
-// /api/gemini.js  (Vercel - Azure OpenAI GPT-4.1)
+// /api/gemini.js  (Chutes AI)
 
 export default async function handler(req, res) {
   res.setHeader("Access-Control-Allow-Origin", "*");
@@ -11,20 +11,18 @@ export default async function handler(req, res) {
   }
 
   try {
-    const API_KEY = process.env.AZURE_OPENAI_API_KEY;
-    const ENDPOINT = process.env.AZURE_OPENAI_ENDPOINT;
-
-    if (!API_KEY || !ENDPOINT) {
+    const API_KEY = process.env.CHUTES_API_KEY;
+    if (!API_KEY) {
       return res.status(500).json({
         ok: false,
-        text: "Backend config error: Missing Azure OpenAI credentials"
+        text: "Backend config error: Missing Chutes API Key"
       });
     }
 
     const body = typeof req.body === "string" ? JSON.parse(req.body) : req.body;
     const { mode = "text", contents, systemInstruction, prompt } = body;
 
-    /* ================= IMAGE MODE (FREE FALLBACK) ================= */
+    /* IMAGE MODE (optional fallback) */
     if (mode === "image") {
       const imgPrompt =
         prompt || contents?.[0]?.parts?.[0]?.text || "Educational diagram";
@@ -39,7 +37,7 @@ export default async function handler(req, res) {
       });
     }
 
-    /* ================= TTS MODE ================= */
+    /* TTS MODE (browser fallback) */
     if (mode === "tts") {
       return res.status(200).json({
         ok: true,
@@ -49,8 +47,7 @@ export default async function handler(req, res) {
       });
     }
 
-    /* ================= TEXT / CHAT MODE ================= */
-
+    /* TEXT MODE */
     let userText = "";
     if (Array.isArray(contents)) {
       contents.forEach(c =>
@@ -65,29 +62,23 @@ export default async function handler(req, res) {
         role: "system",
         content:
           systemInstruction?.parts?.[0]?.text ||
-          "You are PadhaiSetu, a helpful Indian education AI. Respond clearly, politely, and in simple language."
+          "You are PadhaiSetu, a friendly Indian education AI who explains clearly in simple language."
       },
-      {
-        role: "user",
-        content: userText || "Hello"
-      }
+      { role: "user", content: userText || "Hello" }
     ];
 
-    const response = await fetch(
-      `${ENDPOINT}/openai/deployments/gpt-4.1/chat/completions?api-version=2024-02-15-preview`,
-      {
-        method: "POST",
-        headers: {
-          "Content-Type": "application/json",
-          "api-key": API_KEY
-        },
-        body: JSON.stringify({
-          messages,
-          temperature: 0.6,
-          max_tokens: 800
-        })
-      }
-    );
+    const response = await fetch("https://api.chutes.ai/v1/chat/completions", {
+      method: "POST",
+      headers: {
+        "Authorization": `Bearer ${API_KEY}`,
+        "Content-Type": "application/json"
+      },
+      body: JSON.stringify({
+        model: "deepseek-ai/DeepSeek-V3-0324-TEE",
+        messages,
+        temperature: 0.7
+      })
+    });
 
     const data = await response.json();
 
@@ -101,10 +92,10 @@ export default async function handler(req, res) {
     });
 
   } catch (err) {
-    console.error("Azure OpenAI Error:", err);
+    console.error("Chutes Backend Error:", err);
     return res.status(200).json({
       ok: false,
-      text: "AI busy hai. Thodi der baad try karo."
+      text: "Temporary server issue. Please retry."
     });
   }
-}
+  }
