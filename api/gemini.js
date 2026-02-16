@@ -1,25 +1,30 @@
-// api/gemini.js - SILICONFLOW ONLY (Using FREE Models)
+// api/gemini.js - ULTIMATE FIXED VERSION
 
 export default async function handler(req, res) {
+  // ✅ सही CORS headers
   res.setHeader('Access-Control-Allow-Origin', '*');
-  res.setHeader('Access-Control-Allow-Headers', 'Content-Type');
-  res.setHeader('Access-Control-Allow-Methods', 'POST, OPTIONS');
+  res.setHeader('Access-Control-Allow-Headers', 'Origin, X-Requested-With, Content-Type, Accept');
+  res.setHeader('Access-Control-Allow-Methods', 'POST, GET, OPTIONS');
+  res.setHeader('Access-Control-Max-Age', '86400'); // 24 hours
 
-  if (req.method === 'OPTIONS') return res.status(200).end();
+  // ✅ OPTIONS request handle करो
+  if (req.method === 'OPTIONS') {
+    return res.status(204).end();
+  }
 
+  // ✅ सिर्फ POST allow करो
   if (req.method !== 'POST') {
     return res.status(200).json({
       candidates: [{
         content: {
-          parts: [{ text: "Method not allowed." }]
+          parts: [{ text: "Please use POST method." }]
         }
       }]
     });
   }
 
   try {
-    const payload = req.body;
-    const { mode, contents, systemInstruction } = payload;
+    const { mode, contents, systemInstruction } = req.body;
 
     if (mode === 'text') {
       const userMessage = contents?.[0]?.parts?.[0]?.text || '';
@@ -34,11 +39,10 @@ export default async function handler(req, res) {
         });
       }
 
-      // ✅ FREE MODELS (Bonus Balance की जरूरत नहीं)
+      // ✅ SiliconFlow FREE Models
       const models = [
-        'Qwen/Qwen2.5-7B-Instruct',     // ✅ Always FREE
-        'meta-llama/Meta-Llama-3.1-8B-Instruct', // ✅ Always FREE
-        'THUDM/glm-4-9b-chat'            // ✅ FREE
+        'Qwen/Qwen2.5-7B-Instruct',
+        'meta-llama/Meta-Llama-3.1-8B-Instruct'
       ];
 
       for (const model of models) {
@@ -52,13 +56,13 @@ export default async function handler(req, res) {
             body: JSON.stringify({
               model,
               messages: [
-                { role: 'system', content: systemInstruction || "You are PadhaiSetu, a helpful educational assistant." },
+                { role: 'system', content: systemInstruction || "You are PadhaiSetu, a helpful assistant." },
                 { role: 'user', content: userMessage }
               ],
               temperature: 0.7,
-              max_tokens: 2000  // ⚡ कम कर दिया timeout के लिए
+              max_tokens: 1000
             })
-          }, 8000); // ⏱️ 8 second timeout
+          });
 
           if (!response.ok) continue;
 
@@ -73,7 +77,6 @@ export default async function handler(req, res) {
             }]
           });
         } catch (e) {
-          console.log(`Model ${model} failed:`, e.message);
           continue;
         }
       }
@@ -81,7 +84,7 @@ export default async function handler(req, res) {
       return res.status(200).json({
         candidates: [{
           content: {
-            parts: [{ text: "Service unavailable. Please try again." }]
+            parts: [{ text: "माफ कीजिए, सेवा में समस्या है। 🙏" }]
           }
         }]
       });
@@ -90,7 +93,7 @@ export default async function handler(req, res) {
     return res.status(200).json({
       candidates: [{
         content: {
-          parts: [{ text: "Namaste!" }]
+          parts: [{ text: "नमस्ते! मैं PadhaiSetu हूँ।" }]
         }
       }]
     });
@@ -99,9 +102,9 @@ export default async function handler(req, res) {
     return res.status(200).json({
       candidates: [{
         content: {
-          parts: [{ text: "Error occurred. Please try again." }]
+          parts: [{ text: "माफ कीजिए, कुछ गड़बड़ हुई। 🙏" }]
         }
       }]
     });
   }
-      }
+    }
