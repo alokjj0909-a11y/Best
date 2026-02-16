@@ -1,184 +1,116 @@
-// api/gemini.js - FINAL WORKING VERSION
-// SiliconFlow Official API - FREE Models
-
+// api/gemini.js - GOOGLE STUDIO VERSION
 export default async function handler(req, res) {
-  // ✅ CORS headers
+  // 1. CORS Headers (Security)
   res.setHeader('Access-Control-Allow-Origin', '*');
-  res.setHeader('Access-Control-Allow-Headers', 'Content-Type, Authorization');
+  res.setHeader('Access-Control-Allow-Headers', 'Content-Type');
   res.setHeader('Access-Control-Allow-Methods', 'POST, OPTIONS');
 
-  // ✅ Handle OPTIONS request (preflight)
-  if (req.method === 'OPTIONS') {
-    return res.status(200).end();
-  }
+  if (req.method === 'OPTIONS') return res.status(200).end();
+  if (req.method !== 'POST') return res.status(405).json({ error: "Method not allowed" });
 
-  // ✅ Only allow POST
-  if (req.method !== 'POST') {
-    return res.status(200).json({
-      candidates: [{
-        content: {
-          parts: [{ text: "Please use POST method." }]
-        }
-      }]
-    });
-  }
+  // 2. API Key Check (Vercel Environment Variable)
+  const apiKey = process.env.GEMINI_API_KEY; 
+  if (!apiKey) return res.status(500).json({ error: "Server Error: API Key Missing" });
+
+  const { mode, contents, prompt } = req.body;
 
   try {
-    const { mode, contents, systemInstruction } = req.body;
-
-    // ---------- MODE: TEXT / CHAT ----------
-    if (mode === 'text') {
-      const userMessage = contents?.[0]?.parts?.[0]?.text || '';
+    // ==========================================
+    // 🎨 MODE: IMAGE GENERATION (Imagen 3)
+    // ==========================================
+    if (mode === 'image') {
+      const url = `https://generativelanguage.googleapis.com/v1beta/models/imagen-3.0-generate-001:predict?key=${apiKey}`;
       
-      if (!userMessage) {
-        return res.status(200).json({
-          candidates: [{
-            content: {
-              parts: [{ text: "Please provide a message." }]
-            }
-          }]
-        });
-      }
-
-      // ✅ Check if API key exists
-      if (!process.env.SILICONFLOW_KEY) {
-        console.error('❌ SILICONFLOW_KEY not found in environment');
-        return res.status(200).json({
-          candidates: [{
-            content: {
-              parts: [{ text: "Server configuration error. Please contact admin." }]
-            }
-          }]
-        });
-      }
-
-      // ✅ FREE Models that work with your account
-      const models = [
-        'Qwen/Qwen2.5-7B-Instruct',
-        'meta-llama/Meta-Llama-3.1-8B-Instruct',
-        'THUDM/glm-4-9b-chat'
-      ];
-
-      for (const model of models) {
-        try {
-          console.log(`🔄 Trying model: ${model}`);
-          
-          const response = await fetch('https://api.siliconflow.cn/v1/chat/completions', {
-            method: 'POST',
-            headers: {
-              // ✅ .trim() removes any accidental spaces
-              'Authorization': `Bearer ${process.env.SILICONFLOW_KEY?.trim()}`,
-              'Content-Type': 'application/json'
-            },
-            body: JSON.stringify({
-              model: model,
-              messages: [
-                {
-                  role: 'system',
-                  content: systemInstruction || "You are PadhaiSetu, a helpful educational assistant. Respond in Hindi, English, or Gujarati as per user's language."
-                },
-                {
-                  role: 'user',
-                  content: userMessage
-                }
-              ],
-              temperature: 0.7,
-              max_tokens: 1000 // Faster response for Vercel timeout
-            })
-          });
-
-          if (!response.ok) {
-            const errorText = await response.text();
-            console.log(`❌ Model ${model} failed:`, response.status, errorText);
-            continue;
-          }
-
-          const data = await response.json();
-          const aiResponse = data.choices[0]?.message?.content;
-
-          if (!aiResponse) {
-            console.log('❌ No content in response');
-            continue;
-          }
-
-          console.log(`✅ Model ${model} succeeded`);
-          
-          // ✅ Return in Gemini format
-          return res.status(200).json({
-            candidates: [{
-              content: {
-                parts: [{ text: aiResponse }]
-              }
-            }]
-          });
-
-        } catch (error) {
-          console.log(`❌ Model ${model} error:`, error.message);
-          continue;
-        }
-      }
-
-      // All models failed
-      return res.status(200).json({
-        candidates: [{
-          content: {
-            parts: [{ text: "सेवा उपलब्ध नहीं है। कृपया बाद में प्रयास करें। 🙏" }]
-          }
-        }]
+      const response = await fetch(url, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+            instances: [{ prompt: prompt || "Educational diagram" }],
+            parameters: { sampleCount: 1, aspectRatio: "1:1" }
+        })
       });
-    }
 
-    // ---------- MODE: TITLE GENERATION ----------
-    else if (mode === 'title') {
-      const text = contents?.[0]?.parts?.[0]?.text || "chat";
+      const data = await response.json();
       
-      try {
-        const response = await fetch('https://api.siliconflow.cn/v1/chat/completions', {
-          method: 'POST',
-          headers: {
-            'Authorization': `Bearer ${process.env.SILICONFLOW_KEY?.trim()}`,
-            'Content-Type': 'application/json'
-          },
-          body: JSON.stringify({
-            model: 'Qwen/Qwen2.5-7B-Instruct',
-            messages: [{
-              role: 'user',
-              content: `Generate a very short title (max 4 words) for this conversation: "${text}"`
-            }],
-            temperature: 0.3,
-            max_tokens: 30
-          })
-        });
+      // Error Check
+      if (data.error) throw new Error(data.error.message);
 
-        if (!response.ok) {
-          return res.status(200).json({ text: "New Chat" });
-        }
-
-        const data = await response.json();
-        const title = data.choices[0]?.message?.content?.replace(/["']/g, '').trim() || "New Chat";
-        return res.status(200).json({ text: title });
-      } catch (error) {
-        return res.status(200).json({ text: "New Chat" });
+      if (data.predictions?.[0]?.bytesBase64Encoded) {
+        return res.status(200).json({ image: data.predictions[0].bytesBase64Encoded });
+      } else {
+        throw new Error("Image generation failed");
       }
     }
 
-    // ---------- DEFAULT FALLBACK ----------
-    return res.status(200).json({
-      candidates: [{
-        content: {
-          parts: [{ text: "नमस्ते! मैं PadhaiSetu हूँ।" }]
-        }
-      }]
-    });
+    // ==========================================
+    // 🎤 MODE: TTS (Audio via Gemini 2.0)
+    // ==========================================
+    else if (mode === 'tts') {
+      const url = `https://generativelanguage.googleapis.com/v1beta/models/gemini-2.0-flash:generateContent?key=${apiKey}`;
+      
+      const textToSpeak = contents?.[0]?.parts?.[0]?.text || "Hello";
+
+      const response = await fetch(url, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+            contents: [{ parts: [{ text: "Read this naturally: " + textToSpeak }] }],
+            generationConfig: {
+                responseModalities: ["AUDIO"], // Audio maang rahe hain
+                speechConfig: { voiceConfig: { prebuiltVoiceConfig: { voiceName: "Aoede" } } }
+            }
+        })
+      });
+
+      const data = await response.json();
+      
+      // Error Check
+      if (data.error) {
+          // Agar Audio fail ho jaye, to error bhejo taki browser khud bol le
+          return res.status(400).json({ error: "TTS Fallback" });
+      }
+
+      const audioData = data.candidates?.[0]?.content?.parts?.[0]?.inlineData?.data;
+
+      if (audioData) {
+        return res.status(200).json({ audio: audioData });
+      } else {
+        return res.status(400).json({ error: "No audio data" });
+      }
+    }
+
+    // ==========================================
+    // 💬 MODE: TEXT & VISION (Gemini 2.0 Flash)
+    // ==========================================
+    else {
+      // Sabse fast aur smart model (Chat + Images samajhne ke liye)
+      const url = `https://generativelanguage.googleapis.com/v1beta/models/gemini-2.0-flash:generateContent?key=${apiKey}`;
+      
+      const response = await fetch(url, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+            contents: contents,
+            systemInstruction: req.body.systemInstruction, // Persona set karne ke liye
+            generationConfig: { temperature: 0.7 }
+        })
+      });
+
+      const data = await response.json();
+      
+      if (data.error) throw new Error(data.error.message);
+
+      const text = data.candidates?.[0]?.content?.parts?.[0]?.text;
+
+      if (text) {
+        return res.status(200).json({ text: text });
+      } else {
+        throw new Error("No text response");
+      }
+    }
 
   } catch (error) {
-    console.error('🔥 Server error:', error);
-    return res.status(200).json({
-      candidates: [{
-        content: {
-          parts: [{ text: "कोई त्रुटि हुई। कृपया पुनः प्रयास करें। 🙏" }]
-        }
-      }]
-    });
+    console.error("Backend Error:", error);
+    return res.status(500).json({ error: "PadhaiSetu Error: " + error.message });
   }
-          }
+}
