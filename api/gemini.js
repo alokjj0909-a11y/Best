@@ -1,4 +1,4 @@
-// gemini.js (Groq backend)
+// gemini.js (Groq backend – FINAL & STABLE)
 
 const GROQ_API_KEY = process.env.GROQ_API_KEY;
 
@@ -20,7 +20,7 @@ export async function callBackendAI({ mode = "text", contents }) {
   ];
 
   const payload = {
-    model: "llama-3.1-8b-instruct",
+    model: "llama-3.3-70b-versatile", // ✅ UPDATED: more stable, human-like, better Hindi
     messages,
     temperature: 0.7,
     max_tokens: 800,
@@ -51,7 +51,7 @@ export async function callBackendAI({ mode = "text", contents }) {
       const data = await res.json();
       const reply = data?.choices?.[0]?.message?.content;
 
-      if (!reply) {
+      if (!reply || typeof reply !== "string") {
         throw new Error("Empty response from Groq");
       }
 
@@ -63,7 +63,7 @@ export async function callBackendAI({ mode = "text", contents }) {
         return "AI thodi busy hai. Thodi der baad try karo 🙏";
       }
 
-      // short delay before retry
+      // retry delay
       await new Promise(r => setTimeout(r, 800));
     }
   }
