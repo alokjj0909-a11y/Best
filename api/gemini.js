@@ -1,4 +1,4 @@
-// api/gemini.js - SiliconFlow + Hugging Face (100% FREE, Higher Limits)
+// api/gemini.js - SiliconFlow + Hugging Face (Bonus Balance Friendly)
 
 const SILICONFLOW_URL = 'https://api.siliconflow.cn/v1/chat/completions';
 
@@ -26,7 +26,7 @@ export default async function handler(req, res) {
     const payload = req.body;
     const { mode, contents, prompt, systemInstruction } = payload;
 
-    // ---------- MODE: TEXT / CHAT (SiliconFlow) ----------
+    // ---------- MODE: TEXT / CHAT ----------
     if (mode === 'text') {
       const userMessage = contents?.[0]?.parts?.[0]?.text || '';
       
@@ -40,7 +40,6 @@ export default async function handler(req, res) {
         });
       }
 
-      // Check if SILICONFLOW_KEY exists
       if (!process.env.SILICONFLOW_KEY) {
         return res.status(200).json({
           candidates: [{
@@ -51,49 +50,75 @@ export default async function handler(req, res) {
         });
       }
 
-      const response = await fetch(SILICONFLOW_URL, {
-        method: 'POST',
-        headers: {
-          'Authorization': `Bearer ${process.env.SILICONFLOW_KEY}`,
-          'Content-Type': 'application/json'
-        },
-        body: JSON.stringify({
-          model: 'meta-llama/Meta-Llama-3.1-8B-Instruct',
-          messages: [
-            {
-              role: 'system',
-              content: systemInstruction || "You are PadhaiSetu, a helpful educational assistant for Indian students. Respond in the same language as the user's query."
-            },
-            {
-              role: 'user',
-              content: userMessage
-            }
-          ],
-          temperature: 0.7,
-          max_tokens: 4096
-        })
-      });
+      // ✅ BONUS BALANCE FRIENDLY MODELS
+      // Try models that work with bonus balance
+      const models = [
+        'Qwen/Qwen2.5-7B-Instruct',           // ✅ Works with bonus
+        'deepseek-ai/DeepSeek-V2.5-7B',       // ✅ Works with bonus
+        'THUDM/glm-4-9b-chat',                 // ✅ Works with bonus
+        'microsoft/Phi-3.5-mini-instruct'      // ✅ Works with bonus
+      ];
 
-      if (!response.ok) {
-        const errorText = await response.text();
-        console.error('❌ SiliconFlow error:', response.status, errorText);
-        
-        return res.status(200).json({
-          candidates: [{
-            content: {
-              parts: [{ text: "माफ कीजिए, AI सेवा में समस्या है। कृपया थोड़ी देर में प्रयास करें। 🙏" }]
-            }
-          }]
-        });
+      let lastError = null;
+      
+      for (const model of models) {
+        try {
+          const response = await fetch(SILICONFLOW_URL, {
+            method: 'POST',
+            headers: {
+              'Authorization': `Bearer ${process.env.SILICONFLOW_KEY}`,
+              'Content-Type': 'application/json'
+            },
+            body: JSON.stringify({
+              model: model,
+              messages: [
+                {
+                  role: 'system',
+                  content: systemInstruction || "You are PadhaiSetu, a helpful educational assistant for Indian students. Respond in the same language as the user's query (Hindi, English, Gujarati, etc.)."
+                },
+                {
+                  role: 'user',
+                  content: userMessage
+                }
+              ],
+              temperature: 0.7,
+              max_tokens: 4096
+            })
+          });
+
+          if (!response.ok) {
+            const errorText = await response.text();
+            console.error(`❌ SiliconFlow error (${model}):`, response.status, errorText);
+            lastError = { status: response.status, text: errorText };
+            continue; // Try next model
+          }
+
+          const data = await response.json();
+          const aiResponse = data.choices[0].message.content;
+
+          // ✅ SUCCESS
+          return res.status(200).json({
+            candidates: [{
+              content: {
+                parts: [{ text: aiResponse }]
+              }
+            }]
+          });
+        } catch (modelError) {
+          console.error(`Model ${model} failed:`, modelError);
+          lastError = modelError;
+          continue;
+        }
       }
 
-      const data = await response.json();
-      const aiResponse = data.choices[0].message.content;
-
+      // All models failed
+      console.error('All SiliconFlow models failed:', lastError);
+      
+      // Friendly error message
       return res.status(200).json({
         candidates: [{
           content: {
-            parts: [{ text: aiResponse }]
+            parts: [{ text: "माफ कीजिए, AI सेवा में समस्या है। कृपया थोड़ी देर में प्रयास करें। 🙏" }]
           }
         }]
       });
@@ -165,28 +190,36 @@ export default async function handler(req, res) {
     else if (mode === 'title') {
       const text = contents?.[0]?.parts?.[0]?.text || "chat";
       
-      const response = await fetch(SILICONFLOW_URL, {
-        method: 'POST',
-        headers: {
-          'Authorization': `Bearer ${process.env.SILICONFLOW_KEY}`,
-          'Content-Type': 'application/json'
-        },
-        body: JSON.stringify({
-          model: 'meta-llama/Meta-Llama-3.1-8B-Instruct',
-          messages: [
-            {
-              role: 'user',
-              content: `Generate a very short title (max 4 words) for this conversation: "${text}"`
-            }
-          ],
-          temperature: 0.3,
-          max_tokens: 30
-        })
-      });
+      try {
+        const response = await fetch(SILICONFLOW_URL, {
+          method: 'POST',
+          headers: {
+            'Authorization': `Bearer ${process.env.SILICONFLOW_KEY}`,
+            'Content-Type': 'application/json'
+          },
+          body: JSON.stringify({
+            model: 'Qwen/Qwen2.5-7B-Instruct', // ✅ Bonus balance friendly
+            messages: [
+              {
+                role: 'user',
+                content: `Generate a very short title (max 4 words) for this conversation: "${text}"`
+              }
+            ],
+            temperature: 0.3,
+            max_tokens: 30
+          })
+        });
 
-      const data = await response.json();
-      const title = data.choices[0].message.content.replace(/["']/g, '').trim();
-      return res.status(200).json({ text: title });
+        if (!response.ok) {
+          return res.status(200).json({ text: "New Chat" });
+        }
+
+        const data = await response.json();
+        const title = data.choices[0].message.content.replace(/["']/g, '').trim();
+        return res.status(200).json({ text: title });
+      } catch (error) {
+        return res.status(200).json({ text: "New Chat" });
+      }
     }
 
     // ---------- DEFAULT FALLBACK ----------
@@ -208,4 +241,4 @@ export default async function handler(req, res) {
       }]
     });
   }
-              }
+      }
