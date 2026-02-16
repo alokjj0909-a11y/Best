@@ -1,4 +1,5 @@
-// api/gemini.js - SiliconFlow + Hugging Face (Bonus Balance Friendly)
+// api/gemini.js - SILICONFLOW ONLY (Bonus Balance Friendly)
+// 100% Working with your HTML
 
 const SILICONFLOW_URL = 'https://api.siliconflow.cn/v1/chat/completions';
 
@@ -24,6 +25,8 @@ export default async function handler(req, res) {
 
   try {
     const payload = req.body;
+    console.log('📥 Received:', JSON.stringify(payload).substring(0, 200));
+
     const { mode, contents, prompt, systemInstruction } = payload;
 
     // ---------- MODE: TEXT / CHAT ----------
@@ -40,7 +43,9 @@ export default async function handler(req, res) {
         });
       }
 
+      // Check if SILICONFLOW_KEY exists
       if (!process.env.SILICONFLOW_KEY) {
+        console.error('❌ SILICONFLOW_KEY missing');
         return res.status(200).json({
           candidates: [{
             content: {
@@ -51,18 +56,19 @@ export default async function handler(req, res) {
       }
 
       // ✅ BONUS BALANCE FRIENDLY MODELS
-      // Try models that work with bonus balance
       const models = [
-        'Qwen/Qwen2.5-7B-Instruct',           // ✅ Works with bonus
-        'deepseek-ai/DeepSeek-V2.5-7B',       // ✅ Works with bonus
-        'THUDM/glm-4-9b-chat',                 // ✅ Works with bonus
-        'microsoft/Phi-3.5-mini-instruct'      // ✅ Works with bonus
+        'Qwen/Qwen2.5-7B-Instruct',
+        'deepseek-ai/DeepSeek-V2.5-7B',
+        'THUDM/glm-4-9b-chat',
+        'microsoft/Phi-3.5-mini-instruct'
       ];
 
       let lastError = null;
       
       for (const model of models) {
         try {
+          console.log(`🔄 Trying model: ${model}`);
+          
           const response = await fetch(SILICONFLOW_URL, {
             method: 'POST',
             headers: {
@@ -90,13 +96,13 @@ export default async function handler(req, res) {
             const errorText = await response.text();
             console.error(`❌ SiliconFlow error (${model}):`, response.status, errorText);
             lastError = { status: response.status, text: errorText };
-            continue; // Try next model
+            continue;
           }
 
           const data = await response.json();
           const aiResponse = data.choices[0].message.content;
 
-          // ✅ SUCCESS
+          // ✅ Return in Gemini format that HTML expects
           return res.status(200).json({
             candidates: [{
               content: {
@@ -104,6 +110,7 @@ export default async function handler(req, res) {
               }
             }]
           });
+          
         } catch (modelError) {
           console.error(`Model ${model} failed:`, modelError);
           lastError = modelError;
@@ -112,9 +119,8 @@ export default async function handler(req, res) {
       }
 
       // All models failed
-      console.error('All SiliconFlow models failed:', lastError);
+      console.error('❌ All models failed. Last error:', lastError);
       
-      // Friendly error message
       return res.status(200).json({
         candidates: [{
           content: {
@@ -127,6 +133,8 @@ export default async function handler(req, res) {
     // ---------- MODE: IMAGE GENERATION (Hugging Face) ----------
     else if (mode === 'image') {
       const imagePrompt = prompt || "educational diagram";
+      
+      console.log('🖼️ IMAGE PROMPT:', imagePrompt);
       
       if (!process.env.HF_TOKEN) {
         return res.status(200).json({
@@ -176,6 +184,7 @@ export default async function handler(req, res) {
           }]
         });
       } catch (error) {
+        console.error('❌ Image generation error:', error);
         return res.status(200).json({
           candidates: [{
             content: {
@@ -198,7 +207,7 @@ export default async function handler(req, res) {
             'Content-Type': 'application/json'
           },
           body: JSON.stringify({
-            model: 'Qwen/Qwen2.5-7B-Instruct', // ✅ Bonus balance friendly
+            model: 'Qwen/Qwen2.5-7B-Instruct',
             messages: [
               {
                 role: 'user',
@@ -222,6 +231,12 @@ export default async function handler(req, res) {
       }
     }
 
+    // ---------- MODE: TTS (Browser fallback) ----------
+    else if (mode === 'tts') {
+      // Browser TTS will handle this
+      return res.status(200).json({ useBrowserTTS: true });
+    }
+
     // ---------- DEFAULT FALLBACK ----------
     return res.status(200).json({
       candidates: [{
@@ -241,4 +256,4 @@ export default async function handler(req, res) {
       }]
     });
   }
-      }
+          }
