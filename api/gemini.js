@@ -1,4 +1,4 @@
-// gemini.js — FINAL, GROQ SAFE VERSION
+// gemini.js — GROQ HARD SAFE VERSION
 
 const GROQ_API_KEY = process.env.GROQ_API_KEY;
 
@@ -7,68 +7,69 @@ export async function callBackendAI({ mode = "text", contents }) {
     return "Server config error: API key missing";
   }
 
-  // ✅ STEP 1: contents ko PURE STRING banana
+  // 🔐 FORCE string only
   let userText = "";
 
-  try {
-    if (typeof contents === "string") {
-      userText = contents;
-    } else if (Array.isArray(contents)) {
-      userText = contents
-        .map(item => item?.parts?.[0]?.text || "")
-        .join("\n")
-        .trim();
-    }
-  } catch {
-    userText = "";
+  if (typeof contents === "string") {
+    userText = contents.trim();
+  } else if (Array.isArray(contents)) {
+    userText = contents
+      .map(c => {
+        if (typeof c === "string") return c;
+        if (c?.parts?.[0]?.text) return c.parts[0].text;
+        return "";
+      })
+      .join("\n")
+      .trim();
   }
 
   if (!userText) {
     return "Kuch likho pehle 🙂";
   }
 
-  // ✅ STEP 2: Groq messages
-  const messages = [
-    {
-      role: "system",
-      content:
-        "You are Badi Didi, a caring Indian tutor. Answer kindly, clearly and in simple Hinglish/Hindi."
-    },
-    {
-      role: "user",
-      content: userText
-    }
-  ];
-
-  // ✅ STEP 3: GROQ payload (NO STREAM)
   const payload = {
     model: "llama-3.3-70b-versatile",
-    messages,
+    messages: [
+      {
+        role: "system",
+        content:
+          "You are Badi Didi, a caring Indian tutor. Answer kindly, clearly and in simple Hindi/Hinglish."
+      },
+      {
+        role: "user",
+        content: userText
+      }
+    ],
     temperature: 0.7,
     max_tokens: 800,
-    stream: false // 🔥 MOST IMPORTANT LINE
+    stream: false // 🚨 MUST
   };
 
   try {
-    const res = await fetch(
-      "https://api.groq.com/openai/v1/chat/completions",
-      {
-        method: "POST",
-        headers: {
-          "Content-Type": "application/json",
-          Authorization: `Bearer ${GROQ_API_KEY}`
-        },
-        body: JSON.stringify(payload)
-      }
-    );
+    const res = await fetch("https://api.groq.com/openai/v1/chat/completions", {
+      method: "POST",
+      headers: {
+        "Content-Type": "application/json",
+        Authorization: `Bearer ${GROQ_API_KEY}`
+      },
+      body: JSON.stringify(payload)
+    });
+
+    const text = await res.text(); // 👈 IMPORTANT
 
     if (!res.ok) {
-      const t = await res.text();
-      console.error("Groq HTTP error:", t);
+      console.error("Groq HTTP error:", text);
       return "AI thodi busy hai, thodi der baad try karo 🙏";
     }
 
-    const data = await res.json();
+    let data;
+    try {
+      data = JSON.parse(text); // 👈 SAFE parse
+    } catch (e) {
+      console.error("JSON parse failed:", text);
+      return "AI ka reply thoda gadbad ho gaya 😅";
+    }
+
     return data?.choices?.[0]?.message?.content || "AI reply empty aaya 😅";
   } catch (err) {
     console.error("Groq fetch error:", err);
