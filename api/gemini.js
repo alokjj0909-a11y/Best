@@ -1,20 +1,23 @@
-// api/gemini.js - SILICONFLOW OFFICIAL API
+// api/gemini.js - FINAL WORKING VERSION
+// SiliconFlow Official API - FREE Models
 
 export default async function handler(req, res) {
-  // CORS headers
+  // ✅ CORS headers
   res.setHeader('Access-Control-Allow-Origin', '*');
   res.setHeader('Access-Control-Allow-Headers', 'Content-Type, Authorization');
   res.setHeader('Access-Control-Allow-Methods', 'POST, OPTIONS');
 
+  // ✅ Handle OPTIONS request (preflight)
   if (req.method === 'OPTIONS') {
     return res.status(200).end();
   }
 
+  // ✅ Only allow POST
   if (req.method !== 'POST') {
     return res.status(200).json({
       candidates: [{
         content: {
-          parts: [{ text: "Method not allowed. Please use POST." }]
+          parts: [{ text: "Please use POST method." }]
         }
       }]
     });
@@ -23,6 +26,7 @@ export default async function handler(req, res) {
   try {
     const { mode, contents, systemInstruction } = req.body;
 
+    // ---------- MODE: TEXT / CHAT ----------
     if (mode === 'text') {
       const userMessage = contents?.[0]?.parts?.[0]?.text || '';
       
@@ -36,7 +40,19 @@ export default async function handler(req, res) {
         });
       }
 
-      // ✅ SiliconFlow के Official FREE Models
+      // ✅ Check if API key exists
+      if (!process.env.SILICONFLOW_KEY) {
+        console.error('❌ SILICONFLOW_KEY not found in environment');
+        return res.status(200).json({
+          candidates: [{
+            content: {
+              parts: [{ text: "Server configuration error. Please contact admin." }]
+            }
+          }]
+        });
+      }
+
+      // ✅ FREE Models that work with your account
       const models = [
         'Qwen/Qwen2.5-7B-Instruct',
         'meta-llama/Meta-Llama-3.1-8B-Instruct',
@@ -45,11 +61,13 @@ export default async function handler(req, res) {
 
       for (const model of models) {
         try {
-          // 📌 Official API call जैसा documentation में है
+          console.log(`🔄 Trying model: ${model}`);
+          
           const response = await fetch('https://api.siliconflow.cn/v1/chat/completions', {
             method: 'POST',
             headers: {
-              'Authorization': `Bearer ${process.env.SILICONFLOW_KEY}`,
+              // ✅ .trim() removes any accidental spaces
+              'Authorization': `Bearer ${process.env.SILICONFLOW_KEY?.trim()}`,
               'Content-Type': 'application/json'
             },
             body: JSON.stringify({
@@ -57,7 +75,7 @@ export default async function handler(req, res) {
               messages: [
                 {
                   role: 'system',
-                  content: systemInstruction || "You are PadhaiSetu, a helpful educational assistant for Indian students. Respond in the same language as the user."
+                  content: systemInstruction || "You are PadhaiSetu, a helpful educational assistant. Respond in Hindi, English, or Gujarati as per user's language."
                 },
                 {
                   role: 'user',
@@ -65,20 +83,27 @@ export default async function handler(req, res) {
                 }
               ],
               temperature: 0.7,
-              max_tokens: 2000
+              max_tokens: 1000 // Faster response for Vercel timeout
             })
           });
 
           if (!response.ok) {
-            console.log(`❌ Model ${model} failed:`, response.status);
+            const errorText = await response.text();
+            console.log(`❌ Model ${model} failed:`, response.status, errorText);
             continue;
           }
 
           const data = await response.json();
-          
-          // ✅ SiliconFlow का response format
-          const aiResponse = data.choices[0].message.content;
+          const aiResponse = data.choices[0]?.message?.content;
 
+          if (!aiResponse) {
+            console.log('❌ No content in response');
+            continue;
+          }
+
+          console.log(`✅ Model ${model} succeeded`);
+          
+          // ✅ Return in Gemini format
           return res.status(200).json({
             candidates: [{
               content: {
@@ -88,11 +113,12 @@ export default async function handler(req, res) {
           });
 
         } catch (error) {
-          console.log(`Model ${model} error:`, error.message);
+          console.log(`❌ Model ${model} error:`, error.message);
           continue;
         }
       }
 
+      // All models failed
       return res.status(200).json({
         candidates: [{
           content: {
@@ -102,7 +128,7 @@ export default async function handler(req, res) {
       });
     }
 
-    // Title generation mode
+    // ---------- MODE: TITLE GENERATION ----------
     else if (mode === 'title') {
       const text = contents?.[0]?.parts?.[0]?.text || "chat";
       
@@ -110,7 +136,7 @@ export default async function handler(req, res) {
         const response = await fetch('https://api.siliconflow.cn/v1/chat/completions', {
           method: 'POST',
           headers: {
-            'Authorization': `Bearer ${process.env.SILICONFLOW_KEY}`,
+            'Authorization': `Bearer ${process.env.SILICONFLOW_KEY?.trim()}`,
             'Content-Type': 'application/json'
           },
           body: JSON.stringify({
@@ -129,13 +155,14 @@ export default async function handler(req, res) {
         }
 
         const data = await response.json();
-        const title = data.choices[0].message.content.replace(/["']/g, '').trim();
+        const title = data.choices[0]?.message?.content?.replace(/["']/g, '').trim() || "New Chat";
         return res.status(200).json({ text: title });
       } catch (error) {
         return res.status(200).json({ text: "New Chat" });
       }
     }
 
+    // ---------- DEFAULT FALLBACK ----------
     return res.status(200).json({
       candidates: [{
         content: {
@@ -145,7 +172,7 @@ export default async function handler(req, res) {
     });
 
   } catch (error) {
-    console.error('Server error:', error);
+    console.error('🔥 Server error:', error);
     return res.status(200).json({
       candidates: [{
         content: {
@@ -154,4 +181,4 @@ export default async function handler(req, res) {
       }]
     });
   }
-            }
+          }
