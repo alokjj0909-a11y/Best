@@ -1,74 +1,41 @@
-// api/gemini.js - SILICONFLOW ONLY (Bonus Balance Friendly)
-// 100% Working with your HTML
+// api/gemini.js - FINAL VERSION
 
 const SILICONFLOW_URL = 'https://api.siliconflow.cn/v1/chat/completions';
 
 export default async function handler(req, res) {
-  // CORS headers
   res.setHeader('Access-Control-Allow-Origin', '*');
   res.setHeader('Access-Control-Allow-Headers', 'Content-Type');
   res.setHeader('Access-Control-Allow-Methods', 'POST, OPTIONS');
 
-  if (req.method === 'OPTIONS') {
-    return res.status(200).end();
-  }
-
+  if (req.method === 'OPTIONS') return res.status(200).end();
   if (req.method !== 'POST') {
     return res.status(200).json({
-      candidates: [{
-        content: {
-          parts: [{ text: "Method not allowed. Please use POST." }]
-        }
-      }]
+      candidates: [{ content: { parts: [{ text: "Method not allowed." }] } }]
     });
   }
 
   try {
     const payload = req.body;
-    console.log('📥 Received:', JSON.stringify(payload).substring(0, 200));
+    const { mode, contents, systemInstruction } = payload;
 
-    const { mode, contents, prompt, systemInstruction } = payload;
-
-    // ---------- MODE: TEXT / CHAT ----------
     if (mode === 'text') {
       const userMessage = contents?.[0]?.parts?.[0]?.text || '';
-      
       if (!userMessage) {
         return res.status(200).json({
-          candidates: [{
-            content: {
-              parts: [{ text: "Please provide a message." }]
-            }
-          }]
+          candidates: [{ content: { parts: [{ text: "Please provide a message." }] } }]
         });
       }
 
-      // Check if SILICONFLOW_KEY exists
       if (!process.env.SILICONFLOW_KEY) {
-        console.error('❌ SILICONFLOW_KEY missing');
         return res.status(200).json({
-          candidates: [{
-            content: {
-              parts: [{ text: "Server configuration error: SiliconFlow key missing." }]
-            }
-          }]
+          candidates: [{ content: { parts: [{ text: "Server error: API key missing." }] } }]
         });
       }
 
-      // ✅ BONUS BALANCE FRIENDLY MODELS
-      const models = [
-        'Qwen/Qwen2.5-7B-Instruct',
-        'deepseek-ai/DeepSeek-V2.5-7B',
-        'THUDM/glm-4-9b-chat',
-        'microsoft/Phi-3.5-mini-instruct'
-      ];
-
-      let lastError = null;
+      const models = ['Qwen/Qwen2.5-7B-Instruct', 'deepseek-ai/DeepSeek-V2.5-7B'];
       
       for (const model of models) {
         try {
-          console.log(`🔄 Trying model: ${model}`);
-          
           const response = await fetch(SILICONFLOW_URL, {
             method: 'POST',
             headers: {
@@ -76,184 +43,38 @@ export default async function handler(req, res) {
               'Content-Type': 'application/json'
             },
             body: JSON.stringify({
-              model: model,
+              model,
               messages: [
-                {
-                  role: 'system',
-                  content: systemInstruction || "You are PadhaiSetu, a helpful educational assistant for Indian students. Respond in the same language as the user's query (Hindi, English, Gujarati, etc.)."
-                },
-                {
-                  role: 'user',
-                  content: userMessage
-                }
+                { role: 'system', content: systemInstruction || "You are PadhaiSetu, a helpful assistant." },
+                { role: 'user', content: userMessage }
               ],
               temperature: 0.7,
               max_tokens: 4096
             })
           });
 
-          if (!response.ok) {
-            const errorText = await response.text();
-            console.error(`❌ SiliconFlow error (${model}):`, response.status, errorText);
-            lastError = { status: response.status, text: errorText };
-            continue;
-          }
-
+          if (!response.ok) continue;
           const data = await response.json();
           const aiResponse = data.choices[0].message.content;
 
-          // ✅ Return in Gemini format that HTML expects
           return res.status(200).json({
-            candidates: [{
-              content: {
-                parts: [{ text: aiResponse }]
-              }
-            }]
+            candidates: [{ content: { parts: [{ text: aiResponse }] } }]
           });
-          
-        } catch (modelError) {
-          console.error(`Model ${model} failed:`, modelError);
-          lastError = modelError;
-          continue;
-        }
+        } catch (e) { continue; }
       }
 
-      // All models failed
-      console.error('❌ All models failed. Last error:', lastError);
-      
       return res.status(200).json({
-        candidates: [{
-          content: {
-            parts: [{ text: "माफ कीजिए, AI सेवा में समस्या है। कृपया थोड़ी देर में प्रयास करें। 🙏" }]
-          }
-        }]
+        candidates: [{ content: { parts: [{ text: "Service unavailable. Please try again." }] } }]
       });
     }
 
-    // ---------- MODE: IMAGE GENERATION (Hugging Face) ----------
-    else if (mode === 'image') {
-      const imagePrompt = prompt || "educational diagram";
-      
-      console.log('🖼️ IMAGE PROMPT:', imagePrompt);
-      
-      if (!process.env.HF_TOKEN) {
-        return res.status(200).json({
-          candidates: [{
-            content: {
-              parts: [{ text: "Image generation not configured." }]
-            }
-          }]
-        });
-      }
-
-      try {
-        const response = await fetch('https://api-inference.huggingface.co/models/black-forest-labs/FLUX.1-dev', {
-          method: 'POST',
-          headers: {
-            'Authorization': `Bearer ${process.env.HF_TOKEN}`,
-            'Content-Type': 'application/json'
-          },
-          body: JSON.stringify({ inputs: imagePrompt })
-        });
-
-        if (!response.ok) {
-          if (response.status === 503) {
-            return res.status(200).json({
-              candidates: [{
-                content: {
-                  parts: [{ text: "⏳ Image model is loading. Please try again in 20 seconds." }]
-                }
-              }]
-            });
-          }
-          return res.status(200).json({
-            candidates: [{
-              content: {
-                parts: [{ text: "Image generation failed. Please try again." }]
-              }
-            }]
-          });
-        }
-
-        const imageBuffer = await response.arrayBuffer();
-        const base64Image = Buffer.from(imageBuffer).toString('base64');
-
-        return res.status(200).json({
-          predictions: [{
-            bytesBase64Encoded: base64Image
-          }]
-        });
-      } catch (error) {
-        console.error('❌ Image generation error:', error);
-        return res.status(200).json({
-          candidates: [{
-            content: {
-              parts: [{ text: "Image generation service unavailable." }]
-            }
-          }]
-        });
-      }
-    }
-
-    // ---------- MODE: TITLE GENERATION ----------
-    else if (mode === 'title') {
-      const text = contents?.[0]?.parts?.[0]?.text || "chat";
-      
-      try {
-        const response = await fetch(SILICONFLOW_URL, {
-          method: 'POST',
-          headers: {
-            'Authorization': `Bearer ${process.env.SILICONFLOW_KEY}`,
-            'Content-Type': 'application/json'
-          },
-          body: JSON.stringify({
-            model: 'Qwen/Qwen2.5-7B-Instruct',
-            messages: [
-              {
-                role: 'user',
-                content: `Generate a very short title (max 4 words) for this conversation: "${text}"`
-              }
-            ],
-            temperature: 0.3,
-            max_tokens: 30
-          })
-        });
-
-        if (!response.ok) {
-          return res.status(200).json({ text: "New Chat" });
-        }
-
-        const data = await response.json();
-        const title = data.choices[0].message.content.replace(/["']/g, '').trim();
-        return res.status(200).json({ text: title });
-      } catch (error) {
-        return res.status(200).json({ text: "New Chat" });
-      }
-    }
-
-    // ---------- MODE: TTS (Browser fallback) ----------
-    else if (mode === 'tts') {
-      // Browser TTS will handle this
-      return res.status(200).json({ useBrowserTTS: true });
-    }
-
-    // ---------- DEFAULT FALLBACK ----------
     return res.status(200).json({
-      candidates: [{
-        content: {
-          parts: [{ text: "Namaste! Main PadhaiSetu hoon. Aapki kya madad kar sakta hoon?" }]
-        }
-      }]
+      candidates: [{ content: { parts: [{ text: "Namaste!" }] } }]
     });
 
   } catch (error) {
-    console.error('🔥 Function error:', error);
     return res.status(200).json({
-      candidates: [{
-        content: {
-          parts: [{ text: "माफ कीजिए, कुछ तकनीकी दिक्कत है। कृपया थोड़ी देर में फिर से कोशिश करें। 🙏" }]
-        }
-      }]
+      candidates: [{ content: { parts: [{ text: "Error occurred. Please try again." }] } }]
     });
   }
-          }
+}
