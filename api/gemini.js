@@ -7,7 +7,7 @@ export async function callBackendAI({ mode = "text", contents }) {
     return "Server config error: API key missing";
   }
 
-  // ✅ STEP 1: contents ko PURE STRING banana (VERY IMPORTANT)
+  // ✅ STEP 1: contents ko PURE STRING banana
   let userText = "";
 
   try {
@@ -18,8 +18,6 @@ export async function callBackendAI({ mode = "text", contents }) {
         .map(item => item?.parts?.[0]?.text || "")
         .join("\n")
         .trim();
-    } else {
-      userText = "";
     }
   } catch {
     userText = "";
@@ -29,7 +27,7 @@ export async function callBackendAI({ mode = "text", contents }) {
     return "Kuch likho pehle 🙂";
   }
 
-  // ✅ STEP 2: Groq-compatible messages
+  // ✅ STEP 2: Groq messages
   const messages = [
     {
       role: "system",
@@ -42,12 +40,13 @@ export async function callBackendAI({ mode = "text", contents }) {
     }
   ];
 
-  // ✅ STEP 3: EXACT Groq payload
+  // ✅ STEP 3: GROQ payload (NO STREAM)
   const payload = {
     model: "llama-3.3-70b-versatile",
     messages,
     temperature: 0.7,
-    max_tokens: 800
+    max_tokens: 800,
+    stream: false // 🔥 MOST IMPORTANT LINE
   };
 
   try {
@@ -75,4 +74,4 @@ export async function callBackendAI({ mode = "text", contents }) {
     console.error("Groq fetch error:", err);
     return "Network ya server issue hai 🙏";
   }
-      }
+}
