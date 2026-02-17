@@ -1,119 +1,119 @@
-// api/gemini.js - FINAL 405B POWERED BACKEND (Translator Logic Included)
+// api/gemini.js - UNSTOPPABLE BACKEND (405B -> 70B -> 8B Fallback)
 
 export default async function handler(req, res) {
-  // 🔥 1. CORS Headers (Security & Connection)
+  // 1. CORS Headers (Zaroori)
   res.setHeader('Access-Control-Allow-Origin', '*');
   res.setHeader('Access-Control-Allow-Methods', 'POST, OPTIONS');
   res.setHeader('Access-Control-Allow-Headers', 'Content-Type');
 
-  // Preflight check
-  if (req.method === 'OPTIONS') {
-    return res.status(200).end();
-  }
-
-  // Only allow POST
-  if (req.method !== 'POST') {
-    return res.status(405).json({ error: 'Method Not Allowed' });
-  }
+  if (req.method === 'OPTIONS') return res.status(200).end();
+  if (req.method !== 'POST') return res.status(405).json({ error: 'Method Not Allowed' });
 
   try {
     const { mode, contents, systemInstruction, prompt } = req.body;
 
-    // ==========================================
-    // 🧠 MODE 1: TEXT / CHAT (SambaNova - Llama 3.1 405B)
-    // ==========================================
+    // =======================================================
+    // 🧠 SMART TEXT MODE (Cascading Fallback System)
+    // =======================================================
     if (mode === 'text') {
       const apiKey = process.env.SAMBANOVA_KEY;
-      
-      if (!apiKey) {
-        return res.status(500).json({ error: 'Server Config Error: SAMBANOVA_KEY missing' });
-      }
+      if (!apiKey) return res.status(500).json({ error: 'Configuration Error: SAMBANOVA_KEY missing in Vercel Settings.' });
 
-      // 1. SYSTEM PROMPT EXTRACTION (HTML se data nikalna)
-      // HTML bhej raha hai: systemInstruction.parts[0].text
+      // 1. Prepare Messages
       let finalSystemPrompt = "You are a helpful AI tutor.";
-      
-      if (systemInstruction && systemInstruction.parts && systemInstruction.parts[0]) {
-        finalSystemPrompt = systemInstruction.parts[0].text;
-      }
+      if (systemInstruction?.parts?.[0]?.text) finalSystemPrompt = systemInstruction.parts[0].text;
 
-      // 2. USER MESSAGE EXTRACTION (HTML se data nikalna)
-      // HTML bhej raha hai: contents[0].parts[0].text
       let userMessage = "";
-      if (contents && contents[0] && contents[0].parts) {
-         // Saare parts ko jod kar ek message banana
-         userMessage = contents[0].parts
-            .filter(part => part.text)
-            .map(part => part.text)
-            .join('\n');
+      if (contents?.[0]?.parts) {
+         userMessage = contents[0].parts.map(p => p.text).filter(t => t).join('\n');
       }
+      if (!userMessage) return res.status(400).json({ error: 'Empty message received.' });
 
-      if (!userMessage) {
-        return res.status(400).json({ error: 'Empty message received.' });
-      }
+      const messages = [
+        { role: "system", content: finalSystemPrompt },
+        { role: "user", content: userMessage }
+      ];
 
-      // 3. CALL SAMBANOVA (Llama Format mein Convert karke bhejna)
-      const response = await fetch("https://api.sambanova.ai/v1/chat/completions", {
-        method: "POST",
-        headers: {
-          "Authorization": `Bearer ${apiKey}`,
-          "Content-Type": "application/json"
-        },
-        body: JSON.stringify({
-          model: "Meta-Llama-3.1-405B-Instruct", // 🔥 Beast Mode 405B
-          messages: [
-            // Yahan humne convert kar diya: { role: "system" }
-            { role: "system", content: finalSystemPrompt },
-            // Aur yahan user message: { role: "user" }
-            { role: "user", content: userMessage }
-          ],
-          temperature: 0.7,
-          top_p: 0.9,
-          max_tokens: 2000
-        })
-      });
+      // 🔥 HELPER FUNCTION: Call SambaNova with Timeout
+      const callAI = async (modelName, timeoutMs = 9000) => {
+        const controller = new AbortController();
+        const timeoutId = setTimeout(() => controller.abort(), timeoutMs);
+        
+        try {
+            const response = await fetch("https://api.sambanova.ai/v1/chat/completions", {
+                method: "POST",
+                headers: { "Authorization": `Bearer ${apiKey}`, "Content-Type": "application/json" },
+                body: JSON.stringify({
+                    model: modelName,
+                    messages: messages,
+                    temperature: 0.7,
+                    top_p: 0.9,
+                    max_tokens: 1500
+                }),
+                signal: controller.signal
+            });
+            clearTimeout(timeoutId);
+            if (!response.ok) throw new Error(`API Error: ${response.statusText}`);
+            const data = await response.json();
+            return data.choices?.[0]?.message?.content || null;
+        } catch (error) {
+            clearTimeout(timeoutId);
+            throw error;
+        }
+      };
 
-      const data = await response.json();
-
-      // Error Handling
-      if (!response.ok) {
-        console.error("SambaNova Error:", data);
-        return res.status(500).json({ error: "AI is busy (High Traffic). Please try again." });
-      }
-
-      const replyText = data.choices?.[0]?.message?.content;
+      // 🚀 EXECUTION STRATEGY (Fallback Logic)
+      try {
+          // Attempt 1: The Beast (405B) - Best Quality
+          console.log("Attempting 405B...");
+          const text405 = await callAI("Meta-Llama-3.1-405B-Instruct", 8000); // 8 sec timeout
+          if (text405) return res.status(200).json({ text: text405 });
       
-      if (replyText) {
-        return res.status(200).json({ text: replyText });
-      } else {
-        return res.status(200).json({ error: "No response from AI." });
+      } catch (err405) {
+          console.error("405B Failed/Timeout, switching to 70B...", err405.message);
+          
+          try {
+              // Attempt 2: The Smart Speedster (70B)
+              const text70 = await callAI("Meta-Llama-3.3-70B-Instruct", 8000);
+              if (text70) return res.status(200).json({ text: text70 });
+          
+          } catch (err70) {
+              console.error("70B Failed, switching to 8B...", err70.message);
+              
+              try {
+                  // Attempt 3: The Rocket (8B) - Fastest
+                  const text8 = await callAI("Meta-Llama-3.1-8B-Instruct", 5000);
+                  if (text8) return res.status(200).json({ text: text8 });
+              } catch (err8) {
+                  // If everything fails, show the REAL error
+                  return res.status(500).json({ error: `All models failed. Last error: ${err8.message}` });
+              }
+          }
       }
+      return res.status(500).json({ error: "AI gave no response." });
     }
 
-    // ==========================================
-    // 🎨 MODE 2: IMAGE GENERATION (Pollinations AI)
-    // ==========================================
+    // =======================================================
+    // 🎨 IMAGE MODE (Unchanged)
+    // =======================================================
     if (mode === 'image') {
       const encodedPrompt = encodeURIComponent(prompt || "education");
       const randomSeed = Math.floor(Math.random() * 10000);
-      
       const imageUrl = `https://image.pollinations.ai/prompt/${encodedPrompt}?nologo=true&seed=${randomSeed}&width=1024&height=1024&model=flux`;
-
       return res.status(200).json({ image: imageUrl });
     }
 
-    // ==========================================
-    // 🎤 MODE 3: TTS FALLBACK
-    // ==========================================
-    if (mode === 'tts') {
-       return res.status(200).json({ error: "TTS_FALLBACK" });
-    }
+    // =======================================================
+    // 🎤 TTS MODE (Fallback)
+    // =======================================================
+    if (mode === 'tts') return res.status(200).json({ error: "TTS_FALLBACK" });
 
     return res.status(400).json({ error: 'Invalid mode' });
 
   } catch (error) {
-    console.error("Server Error:", error);
-    return res.status(500).json({ error: "Internal Server Error" });
+    console.error("Critical Server Error:", error);
+    // 🔥 Return ACTUAL Error message to UI for debugging
+    return res.status(500).json({ error: `Server Crash: ${error.message}` });
   }
-  }
-           
+                                                     }
+         
