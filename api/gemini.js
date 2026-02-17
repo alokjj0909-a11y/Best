@@ -1,5 +1,5 @@
-// api/gemini.js - ROCKET SPEED EDITION (Llama 8B + Deepgram)
-// Ye code 0.5 second me jawab dega, isliye robotic voice nahi aayegi.
+// api/gemini.js - BULLETPROOF EDITION (Auto-Switching Models)
+// Agar ek model fail hua, to dusra turant sambhal lega.
 
 export const config = {
   maxDuration: 60,
@@ -7,7 +7,6 @@ export const config = {
 };
 
 export default async function handler(req, res) {
-  // CORS Headers
   res.setHeader('Access-Control-Allow-Origin', '*');
   res.setHeader('Access-Control-Allow-Methods', 'POST, OPTIONS');
   res.setHeader('Access-Control-Allow-Headers', 'Content-Type');
@@ -20,11 +19,47 @@ export default async function handler(req, res) {
     const DEEPGRAM_KEY = process.env.DEEPGRAM_API_KEY;
     const SAMBANOVA_KEY = process.env.SAMBANOVA_KEY;
 
-    // Check Keys
-    if (!DEEPGRAM_KEY || !SAMBANOVA_KEY) return res.status(500).json({ error: "API Keys Missing in Vercel" });
+    if (!DEEPGRAM_KEY || !SAMBANOVA_KEY) return res.status(500).json({ error: "API Keys Missing" });
+
+    // 🔥 HELPER: Model Switcher (Fail-Safe Logic)
+    const callAnyWorkingModel = async (messages, maxTokens) => {
+        // List of models to try (Fastest to Smartest)
+        const models = [
+            "Meta-Llama-3.1-8B-Instruct",  // Priority 1: Super Fast
+            "Meta-Llama-3.3-70B-Instruct", // Priority 2: Smart Backup
+            "Meta-Llama-3.1-405B-Instruct" // Priority 3: Final Backup
+        ];
+
+        for (const model of models) {
+            try {
+                const response = await fetch("https://api.sambanova.ai/v1/chat/completions", {
+                    method: "POST",
+                    headers: { "Authorization": `Bearer ${SAMBANOVA_KEY}`, "Content-Type": "application/json" },
+                    body: JSON.stringify({
+                        model: model,
+                        messages: messages,
+                        temperature: 0.7,
+                        max_tokens: maxTokens
+                    })
+                });
+                
+                if (response.ok) {
+                    const data = await response.json();
+                    if (data.choices && data.choices[0]) {
+                        return data.choices[0].message.content;
+                    }
+                }
+                // Agar response ok nahi hai, loop continue karega next model par
+                console.warn(`${model} failed, trying next...`);
+            } catch (e) {
+                console.warn(`${model} error:`, e);
+            }
+        }
+        throw new Error("All models failed");
+    };
 
     // =================================================================
-    // 🎤 VOICE MODE (Uses Llama 8B - The Fastest Model)
+    // 🎤 MODE 1: VOICE
     // =================================================================
     const hasAudioInput = contents?.[0]?.parts?.some(p => p.inlineData && p.inlineData.mimeType.startsWith('audio'));
     const isTTSRequest = mode === 'tts';
@@ -32,102 +67,88 @@ export default async function handler(req, res) {
     if (isTTSRequest || (mode === 'text' && hasAudioInput)) {
         let userText = "";
 
-        // 1. SUNNA (Deepgram) - Ye kaam kar raha hai (Proven)
+        // 1. LISTEN
         if (hasAudioInput && !isTTSRequest) {
             const audioPart = contents[0].parts.find(p => p.inlineData);
             const audioBuffer = Buffer.from(audioPart.inlineData.data, 'base64');
-            const sttResponse = await fetch("https://api.deepgram.com/v1/listen?model=nova-2&smart_format=true&language=en-IN", {
-                method: "POST",
-                headers: { "Authorization": `Token ${DEEPGRAM_KEY}`, "Content-Type": "audio/wav" },
-                body: audioBuffer
-            });
-            if (!sttResponse.ok) throw new Error("Mic Error");
-            const sttData = await sttResponse.json();
-            userText = sttData.results?.channels?.[0]?.alternatives?.[0]?.transcript;
-            if (!userText) return res.status(200).json({ text: "...", audio: null });
+            try {
+                const sttResponse = await fetch("https://api.deepgram.com/v1/listen?model=nova-2&smart_format=true&language=en-IN", {
+                    method: "POST",
+                    headers: { "Authorization": `Token ${DEEPGRAM_KEY}`, "Content-Type": "audio/wav" },
+                    body: audioBuffer
+                });
+                if (!sttResponse.ok) throw new Error("Mic Error");
+                const sttData = await sttResponse.json();
+                userText = sttData.results?.channels?.[0]?.alternatives?.[0]?.transcript;
+            } catch (e) {
+                return res.status(200).json({ text: "...", audio: null });
+            }
         } else if (isTTSRequest) {
             userText = contents[0].parts[0].text;
         }
 
-        // 2. SOCHNA (Llama 8B - YAHAN CHANGE HAI) ⚡
-        // Hum 405B/70B hata kar 8B use kar rahe hain jo timeout nahi hoga.
+        // 2. THINK (Auto-Switching Models)
         let replyText = userText;
-        if (!isTTSRequest) {
+        if (!isTTSRequest && userText) {
             try {
                 let sysPrompt = "You are PadhaiSetu. Reply in Hinglish. Keep it short (1-2 sentences).";
                 if (systemInstruction?.parts?.[0]?.text) sysPrompt = systemInstruction.parts[0].text;
-
-                const llmResponse = await fetch("https://api.sambanova.ai/v1/chat/completions", {
-                    method: "POST",
-                    headers: { "Authorization": `Bearer ${SAMBANOVA_KEY}`, "Content-Type": "application/json" },
-                    body: JSON.stringify({
-                        model: "Meta-Llama-3.1-8B-Instruct", // 🚀 SUPER FAST
-                        messages: [{ role: "system", content: sysPrompt }, { role: "user", content: userText }],
-                        temperature: 0.6,
-                        max_tokens: 150
-                    })
-                });
-                const llmData = await llmResponse.json();
-                replyText = llmData.choices?.[0]?.message?.content || "Server busy.";
+                
+                // 🔥 Yahan Magic Hai: Ye teeno models try karega jab tak jawab na mile
+                replyText = await callAnyWorkingModel([
+                    { role: "system", content: sysPrompt },
+                    { role: "user", content: userText }
+                ], 200);
             } catch (e) {
-                replyText = "Thinking error.";
+                replyText = "Server abhi busy hai, thodi der baad try karein.";
             }
         }
 
-        // 3. BOLNA (Deepgram Aura)
-        // Agar ye fail hua to hi robotic aawaz aayegi
+        // 3. SPEAK
         try {
             const ttsResponse = await fetch("https://api.deepgram.com/v1/speak?model=aura-asteria-en", {
                 method: "POST",
                 headers: { "Authorization": `Token ${DEEPGRAM_KEY}`, "Content-Type": "application/json" },
                 body: JSON.stringify({ text: replyText.replace(/[*#]/g, '') })
             });
-
-            if (!ttsResponse.ok) throw new Error("TTS Failed");
+            if (!ttsResponse.ok) throw new Error("TTS Error");
             const arrayBuffer = await ttsResponse.arrayBuffer();
             const audioBase64 = Buffer.from(arrayBuffer).toString('base64');
-
-            // Success!
             return res.status(200).json({ audio: audioBase64, text: replyText });
         } catch (e) {
-            // Agar audio fail ho, to text bhejo (Robotic Fallback)
             return res.status(200).json({ text: replyText });
         }
     }
 
     // =================================================================
-    // 🧠 TEXT MODE (Standard)
+    // 🧠 MODE 2: TEXT CHAT
     // =================================================================
     if (mode === 'text') {
+      let sysP = "You are a helpful AI tutor.";
+      if (systemInstruction?.parts?.[0]?.text) sysP = systemInstruction.parts[0].text;
       let userM = contents[0].parts.map(p => p.text).join('\n');
-      
-      // Text mode me bhi hum fast model try karenge
+
       try {
-          const res = await fetch("https://api.sambanova.ai/v1/chat/completions", {
-              method: "POST",
-              headers: { "Authorization": `Bearer ${SAMBANOVA_KEY}`, "Content-Type": "application/json" },
-              body: JSON.stringify({
-                  model: "Meta-Llama-3.1-8B-Instruct",
-                  messages: [{ role: "system", content: "Helpful Tutor." }, { role: "user", content: userM }],
-                  temperature: 0.7,
-                  max_tokens: 800
-              })
-          });
-          const data = await res.json();
-          return res.status(200).json({ text: data.choices?.[0]?.message?.content });
+          // Chat ke liye bhi Backup Models use honge
+          const text = await callAnyWorkingModel([
+              { role: "system", content: sysP },
+              { role: "user", content: userM }
+          ], 1000);
+          return res.status(200).json({ text: text });
       } catch (e) {
-          return res.status(500).json({ error: "Server Busy" });
+          return res.status(500).json({ error: "All AI models are busy." });
       }
     }
 
     if (mode === 'image') {
-       const encodedPrompt = encodeURIComponent(req.body.prompt || "education");
-       return res.status(200).json({ image: `https://image.pollinations.ai/prompt/${encodedPrompt}?nologo=true&model=flux` });
+       const prompt = encodeURIComponent(req.body.prompt || "education");
+       return res.status(200).json({ image: `https://image.pollinations.ai/prompt/${prompt}?nologo=true&model=flux` });
     }
 
     return res.status(400).json({ error: 'Invalid mode' });
 
   } catch (error) {
-    return res.status(500).json({ error: "Server Error", text: "Error occurred." });
+    console.error(error);
+    return res.status(500).json({ error: "Internal Server Error" });
   }
-          }
+                                             }
