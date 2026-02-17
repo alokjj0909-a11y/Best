@@ -1,133 +1,160 @@
-// gemini.js — FINAL PRODUCTION VERSION
-// Stack: SambaNova (LLM) + Deepgram (STT/TTS)
-// Vercel-safe, fast (<3s), no timeout models
+// api/gemini.js — FINAL TIME-BOMB + FALLBACK VERSION
+// Stack: Deepgram (STT + TTS) + SambaNova (LLM)
+// Network-safe, Vercel-safe, Production-ready
 
-const SAMBANOVA_API_KEY = process.env.SAMBANOVA_API_KEY;
-const DEEPGRAM_API_KEY = process.env.DEEPGRAM_API_KEY;
+export const config = {
+  maxDuration: 60,
+  api: {
+    bodyParser: { sizeLimit: "4mb" },
+  },
+};
 
-/* ---------------------------
-   MAIN TEXT / CHAT FUNCTION
----------------------------- */
-export async function callBackendAI({ mode = "text", contents }) {
-  if (!SAMBANOVA_API_KEY) {
-    return "Server config error: AI key missing";
+const SAMBANOVA_URL = "https://api.sambanova.ai/v1/chat/completions";
+
+// ⏱ timeout helper
+async function fetchWithTimeout(url, options, timeoutMs) {
+  const controller = new AbortController();
+  const id = setTimeout(() => controller.abort(), timeoutMs);
+  try {
+    const res = await fetch(url, { ...options, signal: controller.signal });
+    return res;
+  } finally {
+    clearTimeout(id);
   }
+}
 
-  // ✅ Normalize user text
-  let userText = "";
-  if (typeof contents === "string") {
-    userText = contents.trim();
-  } else if (Array.isArray(contents)) {
-    userText = contents
-      .map(c => c?.parts?.[0]?.text || "")
-      .join("\n")
-      .trim();
-  }
-
-  if (!userText) {
-    return "Kuch likho pehle 🙂";
-  }
-
-  // ✅ Strong system prompt (Gujarati/Hindi aware)
-  const messages = [
-    {
-      role: "system",
-      content: `
-You are Badi Didi, a caring Indian tutor.
-Rules:
-- If user writes in Gujarati, reply ONLY in Gujarati.
-- If user writes in Hindi/Hinglish, reply in simple Hinglish/Hindi.
-- Keep answers short, clear, student-friendly.
-- Do NOT give overly long answers.
-      `.trim()
-    },
-    {
-      role: "user",
-      content: userText
-    }
+// 🧠 LLM CALL with MODEL FALLBACK
+async function callSambaNovaLLM({ apiKey, systemPrompt, userText }) {
+  const MODELS = [
+    { name: "Meta-Llama-3.1-405B-Instruct", timeout: 6000 }, // Time bomb 💣
+    { name: "Meta-Llama-3.3-70B-Instruct", timeout: 5000 },  // Fast & smart
+    { name: "Meta-Llama-3-8B-Instruct", timeout: 4000 },     // Emergency
   ];
 
-  // ✅ FAST & SAFE MODEL (NO TIMEOUT)
-  const payload = {
-    model: "Meta-Llama-3-8B-Instruct", // 🔥 FAST & STABLE
-    messages,
-    temperature: 0.4,
-    max_tokens: 300,
-    top_p: 0.9
-  };
+  for (const model of MODELS) {
+    try {
+      const res = await fetchWithTimeout(
+        SAMBANOVA_URL,
+        {
+          method: "POST",
+          headers: {
+            Authorization: `Bearer ${apiKey}`,
+            "Content-Type": "application/json",
+          },
+          body: JSON.stringify({
+            model: model.name,
+            messages: [
+              { role: "system", content: systemPrompt },
+              { role: "user", content: userText },
+            ],
+            temperature: 0.4,
+            max_tokens: 300,
+          }),
+        },
+        model.timeout
+      );
 
+      if (!res.ok) throw new Error("Model failed");
+
+      const data = await res.json();
+      const text = data?.choices?.[0]?.message?.content;
+      if (text) return text;
+
+    } catch (err) {
+      console.warn(`Model skipped: ${model.name}`);
+    }
+  }
+
+  return "Thoda network slow hai 😅 phir se try karo.";
+}
+
+export default async function handler(req, res) {
   try {
-    const res = await fetch(
-      "https://api.sambanova.ai/v1/chat/completions",
+    const { contents, systemInstruction } = req.body;
+
+    const SAMBANOVA_KEY = process.env.SAMBANOVA_API_KEY;
+    const DEEPGRAM_KEY = process.env.DEEPGRAM_API_KEY;
+
+    if (!SAMBANOVA_KEY || !DEEPGRAM_KEY) {
+      return res.status(500).json({ error: "API key missing" });
+    }
+
+    /* ===============================
+       🎤 VOICE → TEXT (Deepgram STT)
+    =============================== */
+    let userText = "";
+    const hasAudio =
+      contents?.[0]?.parts?.some(p => p.inlineData?.mimeType?.startsWith("audio"));
+
+    if (hasAudio) {
+      const audioPart = contents[0].parts.find(p => p.inlineData);
+      const audioBuffer = Buffer.from(audioPart.inlineData.data, "base64");
+
+      const sttRes = await fetch(
+        "https://api.deepgram.com/v1/listen?model=nova-2&language=multi",
+        {
+          method: "POST",
+          headers: {
+            Authorization: `Token ${DEEPGRAM_KEY}`,
+            "Content-Type": "audio/webm",
+          },
+          body: audioBuffer,
+        }
+      );
+
+      const sttData = await sttRes.json();
+      userText =
+        sttData?.results?.channels?.[0]?.alternatives?.[0]?.transcript || "";
+    } else {
+      userText = contents?.[0]?.parts?.map(p => p.text).join(" ") || "";
+    }
+
+    if (!userText.trim()) {
+      return res.status(200).json({ text: "Kuch boliye 🙂" });
+    }
+
+    /* ===============================
+       🧠 THINKING (TIME BOMB LOGIC)
+    =============================== */
+    let systemPrompt =
+      "You are Badi Didi, a caring Indian tutor. Answer simply.";
+
+    if (systemInstruction?.parts?.[0]?.text) {
+      systemPrompt = systemInstruction.parts[0].text;
+    }
+
+    const answer = await callSambaNovaLLM({
+      apiKey: SAMBANOVA_KEY,
+      systemPrompt,
+      userText,
+    });
+
+    /* ===============================
+       🔊 TEXT → VOICE (Deepgram TTS)
+    =============================== */
+    const cleanText = answer.replace(/[*#]/g, "");
+
+    const ttsRes = await fetch(
+      "https://api.deepgram.com/v1/speak?model=aura-asteria-en",
       {
         method: "POST",
         headers: {
+          Authorization: `Token ${DEEPGRAM_KEY}`,
           "Content-Type": "application/json",
-          Authorization: `Bearer ${SAMBANOVA_API_KEY}`
         },
-        body: JSON.stringify(payload)
+        body: JSON.stringify({ text: cleanText }),
       }
     );
 
-    if (!res.ok) {
-      const t = await res.text();
-      console.error("SambaNova error:", t);
-      return "AI thodi busy hai, thodi der baad try karo 🙏";
-    }
+    const audioBuffer = await ttsRes.arrayBuffer();
+    const audioBase64 = Buffer.from(audioBuffer).toString("base64");
 
-    const data = await res.json();
-    return data?.choices?.[0]?.message?.content || "AI reply empty aaya 😅";
+    return res.status(200).json({
+      text: answer,
+      audio: audioBase64,
+    });
   } catch (err) {
-    console.error("SambaNova fetch error:", err);
-    return "Network issue hai, thodi der baad try karo 🙏";
+    console.error("SERVER ERROR:", err);
+    return res.status(500).json({ error: "Internet issue." });
   }
-}
-
-/* ---------------------------
-   VOICE → TEXT (Deepgram STT)
----------------------------- */
-export async function speechToText(audioBuffer) {
-  if (!DEEPGRAM_API_KEY) {
-    throw new Error("Missing Deepgram API key");
-  }
-
-  const res = await fetch(
-    "https://api.deepgram.com/v1/listen?model=nova-2&language=multi",
-    {
-      method: "POST",
-      headers: {
-        Authorization: `Token ${DEEPGRAM_API_KEY}`,
-        "Content-Type": "audio/webm"
-      },
-      body: audioBuffer
-    }
-  );
-
-  const data = await res.json();
-  return (
-    data?.results?.channels?.[0]?.alternatives?.[0]?.transcript || ""
-  );
-}
-
-/* ---------------------------
-   TEXT → VOICE (Deepgram TTS)
----------------------------- */
-export async function textToSpeech(text) {
-  if (!DEEPGRAM_API_KEY) {
-    throw new Error("Missing Deepgram API key");
-  }
-
-  const res = await fetch(
-    "https://api.deepgram.com/v1/speak?model=aura-asteria-en",
-    {
-      method: "POST",
-      headers: {
-        Authorization: `Token ${DEEPGRAM_API_KEY}`,
-        "Content-Type": "application/json"
-      },
-      body: JSON.stringify({ text })
-    }
-  );
-
-  return await res.arrayBuffer(); // audio buffer
-}
+           }
