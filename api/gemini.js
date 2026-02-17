@@ -1,180 +1,168 @@
-// api/gemini.js — FINAL STABLE (SambaNova + Deepgram)
+// api/gemini.js - POWERFUL VOICE STACK (Deepgram STT + SambaNova LLM + Deepgram TTS)
 
 export const config = {
   maxDuration: 60,
   api: {
     bodyParser: {
-      sizeLimit: "6mb", // audio ke liye
+      sizeLimit: '4mb', // Audio upload size badhaya
     },
   },
 };
 
 export default async function handler(req, res) {
-  // CORS
-  res.setHeader("Access-Control-Allow-Origin", "*");
-  res.setHeader("Access-Control-Allow-Methods", "POST, OPTIONS");
-  res.setHeader("Access-Control-Allow-Headers", "Content-Type");
+  // 1. CORS Headers
+  res.setHeader('Access-Control-Allow-Origin', '*');
+  res.setHeader('Access-Control-Allow-Methods', 'POST, OPTIONS');
+  res.setHeader('Access-Control-Allow-Headers', 'Content-Type');
 
-  if (req.method === "OPTIONS") return res.status(200).end();
-  if (req.method !== "POST")
-    return res.status(405).json({ error: "Method Not Allowed" });
+  if (req.method === 'OPTIONS') return res.status(200).end();
+  if (req.method !== 'POST') return res.status(405).json({ error: 'Method Not Allowed' });
 
   try {
     const { mode, contents, systemInstruction } = req.body;
 
-    const SAMBA_KEY = process.env.SAMBANOVA_KEY;
+    // API KEYS CHECK
     const DEEPGRAM_KEY = process.env.DEEPGRAM_API_KEY;
+    const SAMBANOVA_KEY = process.env.SAMBANOVA_KEY;
 
-    if (!SAMBA_KEY)
-      return res.status(500).json({ error: "SAMBANOVA_KEY missing" });
-    if (!DEEPGRAM_KEY)
-      return res.status(500).json({ error: "DEEPGRAM_API_KEY missing" });
+    if (!DEEPGRAM_KEY || !SAMBANOVA_KEY) {
+        return res.status(500).json({ error: "Configuration Error: DEEPGRAM_API_KEY or SAMBANOVA_KEY is missing." });
+    }
 
-    // ======================================================
-    // 🎤 VOICE MODE (STT -> SambaNova -> TTS)
-    // ======================================================
-    const hasAudio =
-      contents?.[0]?.parts?.some(
-        (p) => p.inlineData && p.inlineData.mimeType.startsWith("audio")
-      );
+    // =================================================================
+    // 🎤 MODE 1: VOICE CONVERSATION (Deepgram -> SambaNova -> Deepgram)
+    // =================================================================
+    const hasAudioInput = contents?.[0]?.parts?.some(p => p.inlineData && p.inlineData.mimeType.startsWith('audio'));
+    const isTTSRequest = mode === 'tts';
 
-    if (mode === "tts" || (mode === "text" && hasAudio)) {
-      // ---------- STT ----------
-      let userText = "";
+    if (isTTSRequest || (mode === 'text' && hasAudioInput)) {
+        
+        let userText = "";
 
-      if (hasAudio) {
-        const audioPart = contents[0].parts.find((p) => p.inlineData);
-        const audioBuffer = Buffer.from(audioPart.inlineData.data, "base64");
+        // STEP 1: LISTEN (Deepgram Nova-2 STT) - Agar Audio Aaya Hai
+        if (hasAudioInput && !isTTSRequest) {
+            const audioPart = contents[0].parts.find(p => p.inlineData);
+            const base64Audio = audioPart.inlineData.data;
+            const audioBuffer = Buffer.from(base64Audio, 'base64');
 
-        const sttRes = await fetch(
-          "https://api.deepgram.com/v1/listen?model=nova-2&smart_format=true",
-          {
+            // Deepgram Listen API Call
+            // Nova-2 Model: Best for accuracy & speed
+            const sttResponse = await fetch("https://api.deepgram.com/v1/listen?model=nova-2&smart_format=true&language=en-IN", {
+                method: "POST",
+                headers: {
+                    "Authorization": `Token ${DEEPGRAM_KEY}`,
+                    "Content-Type": "audio/wav" // Ya jo bhi format aa raha hai
+                },
+                body: audioBuffer
+            });
+
+            if (!sttResponse.ok) throw new Error(`Deepgram Ear Failed: ${await sttResponse.text()}`);
+            const sttData = await sttResponse.json();
+            
+            userText = sttData.results?.channels?.[0]?.alternatives?.[0]?.transcript;
+            
+            if (!userText) return res.status(200).json({ text: "...", audio: null }); // Agar kuch sunayi nahi diya
+            console.log("User Said (Deepgram):", userText);
+        } 
+        else if (isTTSRequest) {
+            // Agar seedha text aaya hai bolne ke liye
+            userText = contents[0].parts[0].text;
+        }
+
+        // STEP 2: THINK (SambaNova Llama 405B) - Only if not TTS request
+        let replyText = userText;
+        if (!isTTSRequest) {
+            let sysPrompt = "You are PadhaiSetu, a helpful Indian tutor. Reply in Hinglish (Hindi+English mix). Keep it short, natural and conversational.";
+            if (systemInstruction?.parts?.[0]?.text) sysPrompt = systemInstruction.parts[0].text;
+
+            // SambaNova Call
+            const llmResponse = await fetch("https://api.sambanova.ai/v1/chat/completions", {
+                method: "POST",
+                headers: { 
+                    "Authorization": `Bearer ${SAMBANOVA_KEY}`, 
+                    "Content-Type": "application/json" 
+                },
+                body: JSON.stringify({
+                    model: "Meta-Llama-3.1-405B-Instruct", // The Beast
+                    messages: [
+                        { role: "system", content: sysPrompt },
+                        { role: "user", content: userText }
+                    ],
+                    temperature: 0.7,
+                    max_tokens: 250 // Voice ke liye chhota answer
+                })
+            });
+
+            const llmData = await llmResponse.json();
+            replyText = llmData.choices?.[0]?.message?.content || "Sorry, main soch nahi pa raha hu.";
+        }
+
+        // STEP 3: SPEAK (Deepgram Aura TTS)
+        // Clean markdown for better speech
+        const cleanText = replyText.replace(/[*#`]/g, '').replace(/\[.*?\]/g, ''); 
+
+        const ttsResponse = await fetch("https://api.deepgram.com/v1/speak?model=aura-asteria-en", {
             method: "POST",
             headers: {
-              "Authorization": `Token ${DEEPGRAM_KEY}`,
-              "Content-Type": audioPart.inlineData.mimeType,
+                "Authorization": `Token ${DEEPGRAM_KEY}`,
+                "Content-Type": "application/json"
             },
-            body: audioBuffer,
-          }
-        );
+            body: JSON.stringify({ text: cleanText })
+        });
 
-        if (!sttRes.ok) {
-          const t = await sttRes.text();
-          throw new Error("Deepgram STT failed: " + t);
-        }
+        if (!ttsResponse.ok) throw new Error("Deepgram Mouth Failed");
 
-        const sttData = await sttRes.json();
-        userText =
-          sttData.results?.channels?.[0]?.alternatives?.[0]?.transcript || "";
+        const arrayBuffer = await ttsResponse.arrayBuffer();
+        const audioBase64 = Buffer.from(arrayBuffer).toString('base64');
 
-        if (!userText) {
-          return res.status(200).json({ text: "Main aapki awaaz samajh nahi paaya 🙏" });
-        }
-      } else {
-        userText = contents[0].parts[0].text;
-      }
-
-      // ---------- SYSTEM PROMPT ----------
-      let sysPrompt = "You are Badi Didi, a caring Indian tutor. Reply in simple Hinglish/Hindi.";
-      if (systemInstruction?.parts?.[0]?.text)
-        sysPrompt = systemInstruction.parts[0].text;
-
-      // ---------- SambaNova TEXT ----------
-      const chatRes = await fetch(
-        "https://api.sambanova.ai/v1/chat/completions",
-        {
-          method: "POST",
-          headers: {
-            "Authorization": `Bearer ${SAMBA_KEY}`,
-            "Content-Type": "application/json",
-          },
-          body: JSON.stringify({
-            model: "Meta-Llama-3.3-70B-Instruct",
-            messages: [
-              { role: "system", content: sysPrompt },
-              { role: "user", content: userText },
-            ],
-            temperature: 0.7,
-            max_tokens: 400,
-          }),
-        }
-      );
-
-      if (!chatRes.ok) {
-        throw new Error("SambaNova failed");
-      }
-
-      const chatData = await chatRes.json();
-      const answer =
-        chatData.choices?.[0]?.message?.content ||
-        "Main abhi jawab nahi de pa rahi 🙏";
-
-      // ---------- TTS ----------
-      const ttsRes = await fetch(
-        "https://api.deepgram.com/v1/speak?model=aura-asteria-en",
-        {
-          method: "POST",
-          headers: {
-            "Authorization": `Token ${DEEPGRAM_KEY}`,
-            "Content-Type": "application/json",
-          },
-          body: JSON.stringify({ text: answer }),
-        }
-      );
-
-      if (!ttsRes.ok) {
-        const t = await ttsRes.text();
-        throw new Error("Deepgram TTS failed: " + t);
-      }
-
-      const audioArray = await ttsRes.arrayBuffer();
-      const audioBase64 = Buffer.from(audioArray).toString("base64");
-
-      return res.status(200).json({
-        text: answer,
-        audio: audioBase64,
-      });
+        return res.status(200).json({ 
+            audio: audioBase64, 
+            text: replyText 
+        });
     }
 
-    // ======================================================
-    // 🧠 TEXT MODE ONLY (FAST)
-    // ======================================================
-    if (mode === "text") {
-      let sysPrompt = "You are a helpful Indian tutor.";
-      if (systemInstruction?.parts?.[0]?.text)
-        sysPrompt = systemInstruction.parts[0].text;
+    // =================================================================
+    // 🧠 MODE 2: TEXT CHAT (SambaNova Only)
+    // =================================================================
+    if (mode === 'text') {
+      let finalSystemPrompt = "You are a helpful AI tutor.";
+      if (systemInstruction?.parts?.[0]?.text) finalSystemPrompt = systemInstruction.parts[0].text;
+      
+      let userMessage = contents[0].parts.map(p => p.text).join('\n');
 
-      const userText = contents[0].parts.map((p) => p.text).join("\n");
-
-      const resp = await fetch(
-        "https://api.sambanova.ai/v1/chat/completions",
-        {
-          method: "POST",
-          headers: {
-            "Authorization": `Bearer ${SAMBA_KEY}`,
-            "Content-Type": "application/json",
-          },
-          body: JSON.stringify({
-            model: "Meta-Llama-3.1-8B-Instruct", // FAST & SAFE
-            messages: [
-              { role: "system", content: sysPrompt },
-              { role: "user", content: userText },
-            ],
-            temperature: 0.7,
-            max_tokens: 800,
-          }),
-        }
-      );
-
-      const data = await resp.json();
-      return res.status(200).json({
-        text: data.choices?.[0]?.message?.content || "",
+      const response = await fetch("https://api.sambanova.ai/v1/chat/completions", {
+        method: "POST",
+        headers: { "Authorization": `Bearer ${SAMBANOVA_KEY}`, "Content-Type": "application/json" },
+        body: JSON.stringify({
+          model: "Meta-Llama-3.1-405B-Instruct",
+          messages: [
+            { role: "system", content: finalSystemPrompt },
+            { role: "user", content: userMessage }
+          ],
+          temperature: 0.7,
+          max_tokens: 1000
+        })
       });
+
+      const data = await response.json();
+      return res.status(200).json({ text: data.choices?.[0]?.message?.content });
     }
 
-    return res.status(400).json({ error: "Invalid mode" });
-  } catch (err) {
-    console.error("SERVER ERROR:", err);
-    return res.status(500).json({ error: err.message });
+    // =================================================================
+    // 🎨 MODE 3: IMAGE GENERATION
+    // =================================================================
+    if (mode === 'image') {
+      const promptText = req.body.prompt || "education";
+      const encodedPrompt = encodeURIComponent(promptText);
+      const randomSeed = Math.floor(Math.random() * 10000);
+      const imageUrl = `https://image.pollinations.ai/prompt/${encodedPrompt}?nologo=true&seed=${randomSeed}&width=1024&height=1024&model=flux`;
+      return res.status(200).json({ image: imageUrl });
+    }
+
+    return res.status(400).json({ error: 'Invalid mode' });
+
+  } catch (error) {
+    console.error("Critical Server Error:", error);
+    return res.status(500).json({ error: error.message });
   }
-  }
+                  }
