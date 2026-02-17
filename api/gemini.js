@@ -11,64 +11,62 @@ export default async function handler(req, res) {
   res.setHeader("Access-Control-Allow-Headers", "Content-Type");
 
   if (req.method === "OPTIONS") return res.status(200).end();
-  if (req.method !== "POST")
+  if (req.method !== "POST") {
     return res.status(405).json({ error: "Method Not Allowed" });
+  }
 
   try {
     const { contents, systemInstruction } = req.body;
-    const GEMINI_KEY = process.env.GEMINI_API_KEY;
 
-    if (!GEMINI_KEY) {
-      return res.status(500).json({ error: "Gemini API key missing" });
+    // 🔐 API KEY FROM VERCEL ENV
+    const RAPID_API_KEY = process.env.RAPID_API_KEY;
+    if (!RAPID_API_KEY) {
+      return res.status(500).json({ error: "RapidAPI key missing" });
     }
 
+    // 🧠 USER MESSAGE
     const userText =
-      contents?.[0]?.parts?.map(p => p.text).join("\n") || "";
+      contents?.[0]?.parts?.map(p => p.text).join("\n") || "Hello";
 
-    const systemText =
+    // 🧑‍🏫 SYSTEM / PERSONA PROMPT
+    const systemPrompt =
       systemInstruction?.parts?.[0]?.text ||
-      "You are a caring Indian study mentor.";
+      "You are a helpful Indian study mentor.";
 
+    // 🔁 RAPIDAPI CALL (same format as you showed)
     const response = await fetch(
-      `https://generativelanguage.googleapis.com/v1beta/models/gemini-1.5-flash:generateContent?key=${GEMINI_KEY}`,
+      "https://chatgpt-42.p.rapidapi.com/gpt4",
       {
         method: "POST",
-        headers: { "Content-Type": "application/json" },
+        headers: {
+          "Content-Type": "application/json",
+          "x-rapidapi-key": RAPID_API_KEY,
+          "x-rapidapi-host": "chatgpt-42.p.rapidapi.com",
+        },
         body: JSON.stringify({
-          contents: [
-            {
-              role: "user",
-              parts: [
-                { text: systemText },
-                { text: userText }
-              ]
-            }
+          messages: [
+            { role: "system", content: systemPrompt },
+            { role: "user", content: userText }
           ],
-          generationConfig: {
-            temperature: 0.7,
-            maxOutputTokens: 1024
-          }
+          web_access: false
         }),
       }
     );
 
     const data = await response.json();
 
-    console.log("GEMINI RAW RESPONSE:", JSON.stringify(data, null, 2));
-
+    // 🧾 RESPONSE PARSING (RapidAPI inconsistent hota hai)
     const text =
-      data?.candidates?.[0]?.content?.parts?.[0]?.text;
-
-    if (!text) {
-      return res.status(200).json({
-        text: "⚠️ Gemini did not return text. Please retry."
-      });
-    }
+      data?.result ||
+      data?.response ||
+      data?.choices?.[0]?.message?.content ||
+      data?.message ||
+      "⚠️ No response from RapidAPI model";
 
     return res.status(200).json({ text });
 
   } catch (err) {
-    console.error("GEMINI ERROR:", err);
-    return res.status(500).json({ error: "Gemini server error" });
+    console.error("RapidAPI ERROR:", err);
+    return res.status(500).json({ error: "RapidAPI server error" });
   }
 }
