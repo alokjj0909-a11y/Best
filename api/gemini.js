@@ -1,72 +1,71 @@
-export const config = {
-  maxDuration: 60,
-  api: {
-    bodyParser: { sizeLimit: "10mb" },
-  },
-};
-
 export default async function handler(req, res) {
-  res.setHeader("Access-Control-Allow-Origin", "*");
-  res.setHeader("Access-Control-Allow-Methods", "POST, OPTIONS");
-  res.setHeader("Access-Control-Allow-Headers", "Content-Type");
-
-  if (req.method === "OPTIONS") return res.status(200).end();
   if (req.method !== "POST") {
-    return res.status(405).json({ error: "Method Not Allowed" });
+    return res.status(405).json({ error: "Method not allowed" });
   }
 
   try {
-    const { contents, systemInstruction } = req.body;
+    const { contents, persona } = req.body;
 
-    // 🔐 API KEY FROM VERCEL ENV
-    const RAPID_API_KEY = process.env.RAPID_API_KEY;
-    if (!RAPID_API_KEY) {
-      return res.status(500).json({ error: "RapidAPI key missing" });
+    // Frontend se aaya hua user text nikaalo
+    const userMessage =
+      contents?.[0]?.parts?.[0]?.text || "";
+
+    if (!userMessage) {
+      return res.status(400).json({ error: "No message provided" });
     }
 
-    // 🧠 USER MESSAGE
-    const userText =
-      contents?.[0]?.parts?.map(p => p.text).join("\n") || "Hello";
+    // System prompt (PadhaiSetu style)
+    const systemPrompt = `
+You are "${persona || "Badi Didi"}" from PadhaiSetu.
+You teach Indian students in simple Hindi/Hinglish.
+Be caring, motivating, and step-by-step.
+Never sound robotic.
+If the student is confused, first comfort them, then explain.
+    `.trim();
 
-    // 🧑‍🏫 SYSTEM / PERSONA PROMPT
-    const systemPrompt =
-      systemInstruction?.parts?.[0]?.text ||
-      "You are a helpful Indian study mentor.";
-
-    // 🔁 RAPIDAPI CALL (same format as you showed)
-    const response = await fetch(
-      "https://chatgpt-42.p.rapidapi.com/gpt4",
-      {
-        method: "POST",
-        headers: {
-          "Content-Type": "application/json",
-          "x-rapidapi-key": RAPID_API_KEY,
-          "x-rapidapi-host": "chatgpt-42.p.rapidapi.com",
-        },
-        body: JSON.stringify({
-          messages: [
-            { role: "system", content: systemPrompt },
-            { role: "user", content: userText }
-          ],
-          web_access: false
-        }),
-      }
-    );
+    // 🔥 1min.ai API call
+    const response = await fetch("https://api.1min.ai/chat/completions", {
+      method: "POST",
+      headers: {
+        "Content-Type": "application/json",
+        "Authorization": `Bearer ${process.env.ONEMIN_API_KEY}`
+      },
+      body: JSON.stringify({
+        model: "gpt-4.1-mini", // fast + powerful
+        messages: [
+          { role: "system", content: systemPrompt },
+          { role: "user", content: userMessage }
+        ]
+      })
+    });
 
     const data = await response.json();
 
-    // 🧾 RESPONSE PARSING (RapidAPI inconsistent hota hai)
     const text =
-      data?.result ||
-      data?.response ||
       data?.choices?.[0]?.message?.content ||
-      data?.message ||
-      "⚠️ No response from RapidAPI model";
+      "Mujhe abhi jawab nahi mila, thoda dobara poochho 😊";
 
-    return res.status(200).json({ text });
+    // Gemini-style response format (tumhare frontend ke liye)
+    res.status(200).json({
+      candidates: [
+        {
+          content: {
+            parts: [{ text }]
+          }
+        }
+      ]
+    });
 
-  } catch (err) {
-    console.error("RapidAPI ERROR:", err);
-    return res.status(500).json({ error: "RapidAPI server error" });
+  } catch (error) {
+    console.error("Gemini API Error:", error);
+    res.status(500).json({
+      candidates: [
+        {
+          content: {
+            parts: [{ text: "Server error ho gaya 😓" }]
+          }
+        }
+      ]
+    });
   }
 }
