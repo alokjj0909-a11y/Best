@@ -1,16 +1,16 @@
-// api/gemini.js - ANTI-CRASH FALLBACK SYSTEM (Deepgram + SambaNova)
+// api/gemini.js - FINAL VOICE STACK (Deepgram + SambaNova Anti-Crash)
 
 export const config = {
-  maxDuration: 60, // Pro users ke liye, Free ke liye 10s hi rahega
+  maxDuration: 60, // Pro plan ke liye 60s, Free ke liye 10s
   api: {
     bodyParser: {
-      sizeLimit: '4mb',
+      sizeLimit: '4mb', // Audio upload size limit
     },
   },
 };
 
 export default async function handler(req, res) {
-  // CORS Setup
+  // 1. CORS Headers (Browser connection ke liye zaroori)
   res.setHeader('Access-Control-Allow-Origin', '*');
   res.setHeader('Access-Control-Allow-Methods', 'POST, OPTIONS');
   res.setHeader('Access-Control-Allow-Headers', 'Content-Type');
@@ -25,14 +25,16 @@ export default async function handler(req, res) {
     const DEEPGRAM_KEY = process.env.DEEPGRAM_API_KEY;
     const SAMBANOVA_KEY = process.env.SAMBANOVA_KEY;
 
-    if (!SAMBANOVA_KEY) return res.status(500).json({ error: "Configuration Error: SAMBANOVA_KEY missing." });
+    if (!DEEPGRAM_KEY || !SAMBANOVA_KEY) {
+        return res.status(500).json({ error: "Server Keys Missing (Check Vercel Settings)" });
+    }
 
     // =================================================================
-    // 🔥 SMART MODEL SWITCHER (Ye 405B ke slow hone par bachayega)
+    // 🔥 SMART SWITCHER (Vercel Timeout se bachne ka tareeka)
     // =================================================================
     const callSambaNovaSafe = async (messages, maxTokens = 800) => {
         
-        // Helper to fetch with timeout
+        // Helper: Fetch with Timeout
         const fetchWithTimeout = async (modelId, timeoutMs) => {
             const controller = new AbortController();
             const id = setTimeout(() => controller.abort(), timeoutMs);
@@ -62,34 +64,33 @@ export default async function handler(req, res) {
             }
         };
 
-        // 🚀 STRATEGY: 
-        // 1. Try 405B (The Beast) -> Give it 6 seconds.
-        // 2. If it fails/timeouts -> Switch to 70B (The Speedster).
+        // 🚀 STRATEGY:
+        // 1. Pehle 405B (Sabse Smart) try karo (6 second tak).
+        // 2. Agar wo slow hai, to turant 70B (Fast) par switch karo.
         try {
             return await fetchWithTimeout("Meta-Llama-3.1-405B-Instruct", 6000);
         } catch (e) {
-            console.warn("405B too slow, switching to 70B...", e.name);
+            console.warn("405B slow/failed, switching to 70B...", e.name);
             try {
-                // 70B is super fast, usually done in 2s
+                // Backup: 70B is super fast
                 return await fetchWithTimeout("Meta-Llama-3.3-70B-Instruct", 8000); 
             } catch (e2) {
-                return "Maafi chahunga, server par load zyada hai. Kripya dobara bolein.";
+                return "Maafi chahunga, server par load zyada hai. Dobara koshish karein.";
             }
         }
     };
 
     // =================================================================
-    // 🎤 MODE 1: VOICE (Deepgram + Safe SambaNova)
+    // 🎤 MODE 1: VOICE (Deepgram Listen -> SambaNova Think -> Deepgram Speak)
     // =================================================================
     const hasAudioInput = contents?.[0]?.parts?.some(p => p.inlineData && p.inlineData.mimeType.startsWith('audio'));
     const isTTSRequest = mode === 'tts';
 
     if (isTTSRequest || (mode === 'text' && hasAudioInput)) {
-        if (!DEEPGRAM_KEY) return res.status(500).json({ error: "DEEPGRAM_API_KEY missing." });
-
+        
         let userText = "";
 
-        // STEP 1: LISTEN (Deepgram Nova-2)
+        // STEP 1: SUNNA (Deepgram Nova-2 STT)
         if (hasAudioInput && !isTTSRequest) {
             const audioPart = contents[0].parts.find(p => p.inlineData);
             const base64Audio = audioPart.inlineData.data;
@@ -97,7 +98,10 @@ export default async function handler(req, res) {
 
             const sttResponse = await fetch("https://api.deepgram.com/v1/listen?model=nova-2&smart_format=true&language=en-IN", {
                 method: "POST",
-                headers: { "Authorization": `Token ${DEEPGRAM_KEY}`, "Content-Type": "audio/wav" },
+                headers: { 
+                    "Authorization": `Token ${DEEPGRAM_KEY}`, 
+                    "Content-Type": "audio/wav" 
+                },
                 body: audioBuffer
             });
 
@@ -105,33 +109,37 @@ export default async function handler(req, res) {
             const sttData = await sttResponse.json();
             userText = sttData.results?.channels?.[0]?.alternatives?.[0]?.transcript;
             
-            if (!userText) return res.status(200).json({ text: "...", audio: null });
+            if (!userText) return res.status(200).json({ text: "...", audio: null }); // Kuch sunayi nahi diya
         } else if (isTTSRequest) {
             userText = contents[0].parts[0].text;
         }
 
-        // STEP 2: THINK (Using Safe Switcher)
+        // STEP 2: SOCHNA (SambaNova Llama)
         let replyText = userText;
         if (!isTTSRequest) {
-            let sysPrompt = "You are PadhaiSetu. Reply in Hinglish. Keep it short.";
+            let sysPrompt = "You are PadhaiSetu. Reply in Hinglish (Hindi+English). Keep it short and natural.";
             if (systemInstruction?.parts?.[0]?.text) sysPrompt = systemInstruction.parts[0].text;
 
-            // 🔥 Safe Call
+            // Voice ke liye chhota answer (300 tokens)
             replyText = await callSambaNovaSafe([
                 { role: "system", content: sysPrompt },
                 { role: "user", content: userText }
-            ], 300); // Max 300 tokens for voice
+            ], 300);
         }
 
-        // STEP 3: SPEAK (Deepgram Aura)
-        const cleanText = replyText.replace(/[*#]/g, '');
+        // STEP 3: BOLNA (Deepgram Aura TTS)
+        const cleanText = replyText.replace(/[*#]/g, '').replace(/\[.*?\]/g, ''); 
         const ttsResponse = await fetch("https://api.deepgram.com/v1/speak?model=aura-asteria-en", {
             method: "POST",
-            headers: { "Authorization": `Token ${DEEPGRAM_KEY}`, "Content-Type": "application/json" },
+            headers: { 
+                "Authorization": `Token ${DEEPGRAM_KEY}`, 
+                "Content-Type": "application/json" 
+            },
             body: JSON.stringify({ text: cleanText })
         });
 
         if (!ttsResponse.ok) throw new Error("Deepgram Mouth Failed");
+
         const arrayBuffer = await ttsResponse.arrayBuffer();
         const audioBase64 = Buffer.from(arrayBuffer).toString('base64');
 
@@ -139,21 +147,21 @@ export default async function handler(req, res) {
     }
 
     // =================================================================
-    // 🧠 MODE 2: TEXT CHAT (Using Safe Switcher)
+    // 🧠 MODE 2: TEXT CHAT (SambaNova Safe Mode)
     // =================================================================
     if (mode === 'text') {
-        let finalSystemPrompt = "You are a helpful AI tutor.";
-        if (systemInstruction?.parts?.[0]?.text) finalSystemPrompt = systemInstruction.parts[0].text;
-        
-        let userMessage = contents[0].parts.map(p => p.text).join('\n');
-        
-        // 🔥 Safe Call for Chat too
-        const responseText = await callSambaNovaSafe([
-            { role: "system", content: finalSystemPrompt },
-            { role: "user", content: userMessage }
-        ], 1000);
+      let finalSystemPrompt = "You are a helpful AI tutor.";
+      if (systemInstruction?.parts?.[0]?.text) finalSystemPrompt = systemInstruction.parts[0].text;
+      
+      let userMessage = contents[0].parts.map(p => p.text).join('\n');
 
-        return res.status(200).json({ text: responseText });
+      // Chat ke liye bada answer allow hai (1500 tokens)
+      const responseText = await callSambaNovaSafe([
+          { role: "system", content: finalSystemPrompt },
+          { role: "user", content: userMessage }
+      ], 1500);
+
+      return res.status(200).json({ text: responseText });
     }
 
     // =================================================================
@@ -170,8 +178,8 @@ export default async function handler(req, res) {
     return res.status(400).json({ error: 'Invalid mode' });
 
   } catch (error) {
-    console.error("Server Error:", error);
-    // Return Proper JSON Error to avoid 'Unexpected Token' in frontend
-    return res.status(500).json({ error: error.message || "Something went wrong" });
+    console.error("Critical Server Error:", error);
+    // Crash hone par bhi JSON bhejo taaki frontend na phate
+    return res.status(500).json({ error: "Server busy or configuration error." });
   }
-          }
+              }
