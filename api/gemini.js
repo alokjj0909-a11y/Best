@@ -1,13 +1,13 @@
-// api/gemini.js — FINAL (SambaNova + Deepgram only)
-// Voice: Deepgram STT + TTS
-// Text: SambaNova Cascade (405B → 70B → 8B)
-// Designed for Vercel (safe from 10s timeout)
+// api/gemini.js
+// FINAL PRODUCTION STACK
+// Deepgram (STT + TTS) + SambaNova (405B → 70B → 8B)
+// Vercel-safe, fast, stable
 
 export const config = {
   maxDuration: 60,
   api: {
     bodyParser: {
-      sizeLimit: "6mb", // audio ke liye
+      sizeLimit: "6mb", // audio upload
     },
   },
 };
@@ -17,7 +17,6 @@ export default async function handler(req, res) {
   res.setHeader("Access-Control-Allow-Origin", "*");
   res.setHeader("Access-Control-Allow-Methods", "POST, OPTIONS");
   res.setHeader("Access-Control-Allow-Headers", "Content-Type");
-
   if (req.method === "OPTIONS") return res.status(200).end();
   if (req.method !== "POST")
     return res.status(405).json({ error: "Method Not Allowed" });
@@ -28,13 +27,11 @@ export default async function handler(req, res) {
     const SAMBA_KEY = process.env.SAMBANOVA_KEY;
     const DEEPGRAM_KEY = process.env.DEEPGRAM_API_KEY;
 
-    if (!SAMBA_KEY)
-      return res.status(500).json({ error: "SAMBANOVA_KEY missing" });
-    if (!DEEPGRAM_KEY)
-      return res.status(500).json({ error: "DEEPGRAM_API_KEY missing" });
+    if (!SAMBA_KEY) throw new Error("SAMBANOVA_KEY missing");
+    if (!DEEPGRAM_KEY) throw new Error("DEEPGRAM_API_KEY missing");
 
     // =====================================================
-    // 🎤 VOICE MODE (Deepgram STT → SambaNova → Deepgram TTS)
+    // 🎤 VOICE MODE (STT → LLM → TTS)
     // =====================================================
     const hasAudio =
       contents?.[0]?.parts?.some(
@@ -42,57 +39,57 @@ export default async function handler(req, res) {
       );
 
     if (mode === "tts" || (mode === "text" && hasAudio)) {
-      // -------- 1. AUDIO EXTRACT --------
-      const audioPart = contents[0].parts.find((p) => p.inlineData);
-      if (!audioPart)
-        return res.status(400).json({ error: "Audio missing" });
+      let userText = "";
 
-      const audioBuffer = Buffer.from(
-        audioPart.inlineData.data,
-        "base64"
-      );
+      // ---------- STT (Deepgram - CORRECT FORMAT) ----------
+      if (hasAudio) {
+        const audioPart = contents[0].parts.find((p) => p.inlineData);
+        const audioBuffer = Buffer.from(
+          audioPart.inlineData.data,
+          "base64"
+        );
 
-      // -------- 2. DEEPGRAM STT (CORRECT FORMAT) --------
-      const sttRes = await fetch(
-        "https://api.deepgram.com/v1/listen?model=nova-2&language=hi",
-        {
-          method: "POST",
-          headers: {
-            Authorization: `Token ${DEEPGRAM_KEY}`,
-            "Content-Type": audioPart.inlineData.mimeType || "audio/webm",
-          },
-          body: audioBuffer, // ⚠️ RAW AUDIO ONLY
+        const sttRes = await fetch(
+          "https://api.deepgram.com/v1/listen?model=nova-2&language=hi",
+          {
+            method: "POST",
+            headers: {
+              Authorization: `Token ${DEEPGRAM_KEY}`,
+              "Content-Type": audioPart.inlineData.mimeType || "audio/webm",
+            },
+            body: audioBuffer, // 🔥 RAW AUDIO ONLY
+          }
+        );
+
+        if (!sttRes.ok) {
+          const e = await sttRes.text();
+          throw new Error("Deepgram STT failed: " + e);
         }
-      );
 
-      if (!sttRes.ok) {
-        const t = await sttRes.text();
-        throw new Error("Deepgram STT failed: " + t);
+        const sttData = await sttRes.json();
+        userText =
+          sttData.results?.channels?.[0]?.alternatives?.[0]?.transcript;
+
+        if (!userText) throw new Error("Empty transcript from Deepgram");
+      } else {
+        userText = contents[0].parts[0].text;
       }
 
-      const sttData = await sttRes.json();
-      const userText =
-        sttData?.results?.channels?.[0]?.alternatives?.[0]?.transcript;
-
-      if (!userText)
-        throw new Error("Deepgram STT empty transcript");
-
-      // -------- 3. SYSTEM PROMPT --------
-      let sysPrompt = "You are Badi Didi, a caring Indian tutor.";
-      if (systemInstruction?.parts?.[0]?.text) {
+      // ---------- SYSTEM PROMPT ----------
+      let sysPrompt =
+        "You are PadhaiSetu, a caring Indian tutor. Reply in Hinglish. Be warm, supportive, and concise.";
+      if (systemInstruction?.parts?.[0]?.text)
         sysPrompt = systemInstruction.parts[0].text;
-      }
 
       const messages = [
         { role: "system", content: sysPrompt },
         { role: "user", content: userText },
       ];
 
-      // -------- 4. SAMBANOVA CASCADE --------
+      // ---------- SambaNova Cascade Helper ----------
       const callSamba = async (model, timeoutMs) => {
         const controller = new AbortController();
-        const tId = setTimeout(() => controller.abort(), timeoutMs);
-
+        const t = setTimeout(() => controller.abort(), timeoutMs);
         try {
           const r = await fetch(
             "https://api.sambanova.ai/v1/chat/completions",
@@ -111,46 +108,32 @@ export default async function handler(req, res) {
               signal: controller.signal,
             }
           );
-
-          clearTimeout(tId);
-          if (!r.ok) throw new Error("Model failed");
-
+          clearTimeout(t);
+          if (!r.ok) throw new Error("Samba error " + r.status);
           const d = await r.json();
           return d.choices?.[0]?.message?.content || null;
         } catch (e) {
-          clearTimeout(tId);
+          clearTimeout(t);
           throw e;
         }
       };
 
-      let replyText = null;
-
+      // ---------- LLM CASCADE ----------
+      let answer = null;
       try {
-        replyText = await callSamba(
-          "Meta-Llama-3.1-405B-Instruct",
-          6000
-        );
-      } catch {
+        answer = await callSamba("Meta-Llama-3.1-405B-Instruct", 6000);
+      } catch {}
+      if (!answer) {
         try {
-          replyText = await callSamba(
-            "Meta-Llama-3.3-70B-Instruct",
-            5000
-          );
-        } catch {
-          replyText = await callSamba(
-            "Meta-Llama-3.1-8B-Instruct",
-            3000
-          );
-        }
+          answer = await callSamba("Meta-Llama-3.3-70B-Instruct", 5000);
+        } catch {}
+      }
+      if (!answer) {
+        answer = await callSamba("Meta-Llama-3.1-8B-Instruct", 4000);
       }
 
-      if (!replyText)
-        return res
-          .status(500)
-          .json({ error: "All models busy" });
-
-      // -------- 5. DEEPGRAM TTS --------
-      const cleanText = replyText.replace(/[*#]/g, "");
+      // ---------- TTS (Deepgram) ----------
+      const cleanText = answer.replace(/[*#_`]/g, "");
 
       const ttsRes = await fetch(
         "https://api.deepgram.com/v1/speak?model=aura-asteria-en",
@@ -167,26 +150,26 @@ export default async function handler(req, res) {
       if (!ttsRes.ok)
         throw new Error("Deepgram TTS failed");
 
-      const audioArr = await ttsRes.arrayBuffer();
-      const audioBase64 = Buffer.from(audioArr).toString("base64");
+      const audioBuf = await ttsRes.arrayBuffer();
+      const audioBase64 = Buffer.from(audioBuf).toString("base64");
 
       return res.status(200).json({
-        text: replyText,
+        text: answer,
         audio: audioBase64,
       });
     }
 
-    // ===========================
-    // 🧠 TEXT ONLY MODE
-    // ===========================
+    // =====================================================
+    // 🧠 TEXT ONLY MODE (SambaNova)
+    // =====================================================
     if (mode === "text") {
-      let sysPrompt = "You are a helpful tutor.";
+      let sysPrompt = "You are a helpful AI tutor.";
       if (systemInstruction?.parts?.[0]?.text)
         sysPrompt = systemInstruction.parts[0].text;
 
       const userText = contents[0].parts.map((p) => p.text).join("\n");
 
-      const r = await fetch(
+      const response = await fetch(
         "https://api.sambanova.ai/v1/chat/completions",
         {
           method: "POST",
@@ -201,15 +184,15 @@ export default async function handler(req, res) {
               { role: "user", content: userText },
             ],
             temperature: 0.7,
-            max_tokens: 800,
+            max_tokens: 1000,
           }),
         }
       );
 
-      const d = await r.json();
-      return res.status(200).json({
-        text: d.choices?.[0]?.message?.content,
-      });
+      const data = await response.json();
+      return res
+        .status(200)
+        .json({ text: data.choices?.[0]?.message?.content });
     }
 
     return res.status(400).json({ error: "Invalid mode" });
@@ -217,4 +200,4 @@ export default async function handler(req, res) {
     console.error("SERVER ERROR:", err);
     return res.status(500).json({ error: err.message });
   }
-          }
+      }
