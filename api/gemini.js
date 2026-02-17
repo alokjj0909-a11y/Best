@@ -1,7 +1,3 @@
-// api/gemini.js — OPENAI FINAL (TEXT + VOICE)
-
-import OpenAI from "openai";
-
 export const config = {
   maxDuration: 60,
   api: {
@@ -10,10 +6,6 @@ export const config = {
     },
   },
 };
-
-const openai = new OpenAI({
-  apiKey: process.env.OPENAI_API_KEY,
-});
 
 export default async function handler(req, res) {
   res.setHeader("Access-Control-Allow-Origin", "*");
@@ -27,74 +19,49 @@ export default async function handler(req, res) {
   try {
     const { mode = "text", contents, systemInstruction } = req.body;
 
-    // =========================================================
-    // 🎤 VOICE → TEXT (STT)
-    // =========================================================
-    const hasAudio =
-      contents?.[0]?.parts?.some(p => p.inlineData?.mimeType?.startsWith("audio"));
-
-    if (mode === "text" && hasAudio) {
-      const audioPart = contents[0].parts.find(p => p.inlineData);
-      const audioBuffer = Buffer.from(audioPart.inlineData.data, "base64");
-
-      const transcript = await openai.audio.transcriptions.create({
-        file: new File([audioBuffer], "audio.webm"),
-        model: "whisper-1",
-      });
-
-      return res.status(200).json({
-        text: transcript.text,
-      });
+    const GEMINI_KEY = process.env.GEMINI_API_KEY;
+    if (!GEMINI_KEY) {
+      return res.status(500).json({ error: "Gemini API key missing" });
     }
 
-    // =========================================================
-    // 🔊 TEXT → VOICE (TTS)
-    // =========================================================
-    if (mode === "tts") {
-      const text = contents?.[0]?.parts?.[0]?.text || "";
-
-      const speech = await openai.audio.speech.create({
-        model: "gpt-4o-mini-tts",
-        voice: "alloy",
-        input: text,
-      });
-
-      const buffer = Buffer.from(await speech.arrayBuffer());
-      return res.status(200).json({
-        audio: buffer.toString("base64"),
-        text,
-      });
-    }
-
-    // =========================================================
-    // 🧠 TEXT CHAT
-    // =========================================================
+    // -------- TEXT CHAT --------
     if (mode === "text") {
-      let systemPrompt = "You are Badi Didi, a caring Indian tutor.";
-      if (systemInstruction?.parts?.[0]?.text) {
-        systemPrompt = systemInstruction.parts[0].text;
-      }
+      const userText =
+        contents?.[0]?.parts?.map(p => p.text).join("\n") || "";
 
-      const userText = contents[0].parts.map(p => p.text).join("\n");
+      const systemPrompt =
+        systemInstruction?.parts?.[0]?.text ||
+        "You are a helpful Indian study mentor.";
 
-      const completion = await openai.chat.completions.create({
-        model: "gpt-4o-mini", // FAST + CHEAP + STABLE
-        messages: [
-          { role: "system", content: systemPrompt },
-          { role: "user", content: userText },
-        ],
-        temperature: 0.7,
-        max_tokens: 800,
-      });
+      const response = await fetch(
+        `https://generativelanguage.googleapis.com/v1beta/models/gemini-1.5-flash:generateContent?key=${GEMINI_KEY}`,
+        {
+          method: "POST",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify({
+            contents: [
+              { role: "user", parts: [{ text: systemPrompt + "\n\n" + userText }] }
+            ],
+            generationConfig: {
+              temperature: 0.7,
+              maxOutputTokens: 1024,
+            },
+          }),
+        }
+      );
 
-      return res.status(200).json({
-        text: completion.choices[0].message.content,
-      });
+      const data = await response.json();
+
+      const text =
+        data?.candidates?.[0]?.content?.parts?.[0]?.text ||
+        "⚠️ No response from Gemini";
+
+      return res.status(200).json({ text });
     }
 
     return res.status(400).json({ error: "Invalid mode" });
   } catch (err) {
-    console.error("OPENAI ERROR:", err);
-    return res.status(500).json({ error: "Server error" });
+    console.error("GEMINI ERROR:", err);
+    return res.status(500).json({ error: "Gemini server error" });
   }
-        }
+}
