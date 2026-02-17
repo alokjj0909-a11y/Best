@@ -1,11 +1,16 @@
-// api/gemini.js - POWERFUL VOICE & INTELLIGENT CHAT BACKEND
+// api/gemini.js - THE ULTIMATE VOICE STACK (Groq + Deepgram)
 
 export const config = {
-  maxDuration: 60, // Voice processing needs time
+  maxDuration: 60,
+  api: {
+    bodyParser: {
+      sizeLimit: '4mb', // Audio upload ke liye limit badhayi
+    },
+  },
 };
 
 export default async function handler(req, res) {
-  // 1. CORS Headers (Allow browser connection)
+  // CORS Setup
   res.setHeader('Access-Control-Allow-Origin', '*');
   res.setHeader('Access-Control-Allow-Methods', 'POST, OPTIONS');
   res.setHeader('Access-Control-Allow-Headers', 'Content-Type');
@@ -16,142 +21,139 @@ export default async function handler(req, res) {
   try {
     const { mode, contents, systemInstruction } = req.body;
 
+    // KEYS CHECK
+    const GROQ_KEY = process.env.GROQ_API_KEY;
+    const DEEPGRAM_KEY = process.env.DEEPGRAM_API_KEY;
+    // Fallback keys (SambaNova/Google) for text/image modes
+    const SAMBANOVA_KEY = process.env.SAMBANOVA_KEY;
+
     // =================================================================
-    // 🎤 MODE 1: VOICE / AUDIO (Human-Like Conversation)
-    // Uses Google Gemini 2.0 Flash (Stable)
+    // 🎤 MODE 1: POWERFUL VOICE (Groq + Deepgram)
     // =================================================================
-    
-    // Check if the user sent Audio input OR requested TTS (Text-to-Speech)
     const hasAudioInput = contents?.[0]?.parts?.some(p => p.inlineData && p.inlineData.mimeType.startsWith('audio'));
     const isTTSRequest = mode === 'tts';
 
     if (isTTSRequest || (mode === 'text' && hasAudioInput)) {
-        const googleKey = process.env.GOOGLE_API_KEY;
-        if (!googleKey) return res.status(500).json({ error: 'GOOGLE_API_KEY missing in Vercel Settings' });
-
-        // 🧠 System Prompt for Voice
-        let sysPromptText = "You are PadhaiSetu, a friendly and energetic Indian tutor.";
-        if (systemInstruction?.parts?.[0]?.text) {
-            sysPromptText = systemInstruction.parts[0].text;
+        
+        if (!GROQ_KEY || !DEEPGRAM_KEY) {
+            return res.status(500).json({ error: "Voice configuration missing (GROQ or DEEPGRAM key)." });
         }
-        // Strict Voice Instructions
-        sysPromptText += " (IMPORTANT: Reply in a natural, human-like voice. Use mixed Hindi-English (Hinglish) if the user speaks it. Keep answers concise and conversational. Do not read out markdown symbols like asterisks.)";
 
-        try {
-            // 🔥 Using the STABLE Gemini 2.0 Flash model
-            const modelName = "gemini-2.0-flash"; 
+        let responseText = "";
+
+        // STEP 1: TRANSCRIBE AUDIO (Agar user ne bola hai)
+        if (hasAudioInput && !isTTSRequest) {
+            const audioPart = contents[0].parts.find(p => p.inlineData);
+            const base64Audio = audioPart.inlineData.data;
+            const audioBuffer = Buffer.from(base64Audio, 'base64');
+
+            // Groq Whisper API Call (Multipart Form Data manually construct karna padega)
+            const boundary = '----WebKitFormBoundary7MA4YWxkTrZu0gW';
+            let body = `--${boundary}\r\n`;
+            body += 'Content-Disposition: form-data; name="model"\r\n\r\nwhisper-large-v3\r\n';
+            body += `--${boundary}\r\n`;
+            body += 'Content-Disposition: form-data; name="file"; filename="audio.webm"\r\n';
+            body += 'Content-Type: audio/webm\r\n\r\n';
             
-            console.log(`🎤 Calling Voice Model: ${modelName}`);
-            
-            const response = await fetch(`https://generativelanguage.googleapis.com/v1beta/models/${modelName}:generateContent?key=${googleKey}`, {
-                method: 'POST',
-                headers: { 'Content-Type': 'application/json' },
+            const bodyHeader = Buffer.from(body, 'utf-8');
+            const bodyFooter = Buffer.from(`\r\n--${boundary}--`, 'utf-8');
+            const finalBody = Buffer.concat([bodyHeader, audioBuffer, bodyFooter]);
+
+            const transResponse = await fetch("https://api.groq.com/openai/v1/audio/transcriptions", {
+                method: "POST",
+                headers: {
+                    "Authorization": `Bearer ${GROQ_KEY}`,
+                    "Content-Type": `multipart/form-data; boundary=${boundary}`,
+                },
+                body: finalBody
+            });
+
+            if (!transResponse.ok) throw new Error(`Groq Hearing Failed: ${await transResponse.text()}`);
+            const transData = await transResponse.json();
+            const userText = transData.text;
+            console.log("User said:", userText);
+
+            // STEP 2: INTELLIGENT THINKING (Llama 3 on Groq)
+            let sysPrompt = "You are PadhaiSetu, a helpful and energetic Indian tutor. Reply in Hinglish (Hindi+English mix). Keep it short and conversational.";
+            if (systemInstruction?.parts?.[0]?.text) sysPrompt = systemInstruction.parts[0].text;
+
+            const chatResponse = await fetch("https://api.groq.com/openai/v1/chat/completions", {
+                method: "POST",
+                headers: { "Authorization": `Bearer ${GROQ_KEY}`, "Content-Type": "application/json" },
                 body: JSON.stringify({
-                    contents: contents, // User's Audio or Text
-                    systemInstruction: { parts: [{ text: sysPromptText }] },
-                    generationConfig: {
-                        temperature: 0.9, // Higher temperature for more natural speech
-                        responseModalities: ["AUDIO"] // 🔥 Force Direct Audio Response
-                    }
+                    model: "llama-3.3-70b-versatile", // Super Fast & Smart
+                    messages: [
+                        { role: "system", content: sysPrompt },
+                        { role: "user", content: userText }
+                    ],
+                    max_tokens: 200
                 })
             });
 
-            if (!response.ok) {
-                const errText = await response.text();
-                throw new Error(`Google API Error: ${errText}`);
-            }
-
-            const data = await response.json();
-            
-            // Extract Audio Data
-            const audioData = data.candidates?.[0]?.content?.parts?.[0]?.inlineData?.data;
-            
-            if (audioData) {
-                // Success! Send audio back to frontend
-                return res.status(200).json({ audio: audioData, text: "🎤 Voice Response" });
-            } else {
-                throw new Error("No audio returned from Gemini");
-            }
-
-        } catch (e) {
-            console.error("Voice Mode Error:", e.message);
-            // Fallback: If 2.0 Flash fails, try 1.5 Flash (Backup)
-            try {
-                console.log("🔄 Trying Backup Model: gemini-1.5-flash");
-                const backupResponse = await fetch(`https://generativelanguage.googleapis.com/v1beta/models/gemini-1.5-flash:generateContent?key=${googleKey}`, {
-                    method: 'POST',
-                    headers: { 'Content-Type': 'application/json' },
-                    body: JSON.stringify({
-                        contents: contents,
-                        systemInstruction: { parts: [{ text: sysPromptText }] },
-                        generationConfig: { responseModalities: ["AUDIO"] }
-                    })
-                });
-                const backupData = await backupResponse.json();
-                const backupAudio = backupData.candidates?.[0]?.content?.parts?.[0]?.inlineData?.data;
-                if (backupAudio) return res.status(200).json({ audio: backupAudio });
-            } catch (backupErr) {
-                return res.status(500).json({ error: "Voice service unavailable. Please use text mode." });
-            }
+            const chatData = await chatResponse.json();
+            responseText = chatData.choices?.[0]?.message?.content || "Hmm, main samajh nahi paaya.";
+        } 
+        else if (isTTSRequest) {
+            // Agar seedha text aaya hai bolne ke liye
+            responseText = contents[0].parts[0].text;
         }
+
+        // STEP 3: SPEAKING (Deepgram Aura) - The Real Magic
+        // Remove Markdown for cleaner speech
+        const cleanText = responseText.replace(/[*#]/g, ''); 
+        
+        // Deepgram call
+        const deepgramRes = await fetch("https://api.deepgram.com/v1/speak?model=aura-asteria-en", {
+            method: "POST",
+            headers: {
+                "Authorization": `Token ${DEEPGRAM_KEY}`,
+                "Content-Type": "application/json"
+            },
+            body: JSON.stringify({ text: cleanText })
+        });
+
+        if (!deepgramRes.ok) throw new Error("Deepgram Speaking Failed");
+
+        const arrayBuffer = await deepgramRes.arrayBuffer();
+        const audioBase64 = Buffer.from(arrayBuffer).toString('base64');
+
+        return res.status(200).json({ 
+            audio: audioBase64, 
+            text: responseText 
+        });
     }
 
     // =================================================================
-    // 🧠 MODE 2: TEXT CHAT (Deep Thinking)
-    // Uses Llama 405B -> 70B -> 8B Cascade
+    // 🧠 MODE 2: TEXT CHAT (SambaNova / Groq Backup)
     // =================================================================
     if (mode === 'text') {
-      const sambaKey = process.env.SAMBANOVA_KEY;
-      if (!sambaKey) return res.status(500).json({ error: 'SAMBANOVA_KEY missing' });
+      const apiKey = SAMBANOVA_KEY || GROQ_KEY; // Use whichever is available
+      const apiUrl = SAMBANOVA_KEY ? "https://api.sambanova.ai/v1/chat/completions" : "https://api.groq.com/openai/v1/chat/completions";
+      const modelName = SAMBANOVA_KEY ? "Meta-Llama-3.1-405B-Instruct" : "llama-3.3-70b-versatile";
+
+      if (!apiKey) return res.status(500).json({ error: 'No Text API Key configured.' });
 
       let finalSystemPrompt = "You are a helpful AI tutor.";
       if (systemInstruction?.parts?.[0]?.text) finalSystemPrompt = systemInstruction.parts[0].text;
       
-      // Strict Formatting Rules for Text Mode
-      finalSystemPrompt += "\n\n[SYSTEM RULE: If asked for difference/comparison, USE MARKDOWN TABLE. If math/physics, use step-by-step logic.]";
-
       let userMessage = contents[0].parts.map(p => p.text).join('\n');
-      const messages = [
-        { role: "system", content: finalSystemPrompt },
-        { role: "user", content: userMessage }
-      ];
 
-      // Helper for Llama Calls
-      const callSambaNova = async (modelId, timeoutMs) => {
-          const controller = new AbortController();
-          const timeoutId = setTimeout(() => controller.abort(), timeoutMs);
-          try {
-              const response = await fetch("https://api.sambanova.ai/v1/chat/completions", {
-                  method: "POST",
-                  headers: { "Authorization": `Bearer ${sambaKey}`, "Content-Type": "application/json" },
-                  body: JSON.stringify({ model: modelId, messages: messages, temperature: 0.7, top_p: 0.9, max_tokens: 1500 }),
-                  signal: controller.signal
-              });
-              clearTimeout(timeoutId);
-              if (!response.ok) throw new Error(`API Status: ${response.status}`);
-              const data = await response.json();
-              return data.choices?.[0]?.message?.content || null;
-          } catch (error) { clearTimeout(timeoutId); throw error; }
-      };
+      const response = await fetch(apiUrl, {
+        method: "POST",
+        headers: { "Authorization": `Bearer ${apiKey}`, "Content-Type": "application/json" },
+        body: JSON.stringify({
+          model: modelName,
+          messages: [
+            { role: "system", content: finalSystemPrompt },
+            { role: "user", content: userMessage }
+          ],
+          temperature: 0.7,
+          max_tokens: 1000
+        })
+      });
 
-      try {
-          // 1. Try 405B (The Beast) - 6s Timeout
-          const text405 = await callSambaNova("Meta-Llama-3.1-405B-Instruct", 6000);
-          if (text405) return res.status(200).json({ text: text405 });
-      } catch (err405) {
-          console.warn("405B busy, switching to 70B...");
-          try {
-              // 2. Try 70B (The Genius) - 5s Timeout
-              const text70 = await callSambaNova("Meta-Llama-3.3-70B-Instruct", 5000);
-              if (text70) return res.status(200).json({ text: text70 });
-          } catch (err70) {
-              try {
-                  // 3. Try 8B (The Rocket) - 4s Timeout
-                  const text8 = await callSambaNova("Meta-Llama-3.1-8B-Instruct", 4000);
-                  if (text8) return res.status(200).json({ text: text8 });
-              } catch (e) { return res.status(500).json({ error: "AI is currently overloaded. Please try again." }); }
-          }
-      }
+      const data = await response.json();
+      return res.status(200).json({ text: data.choices?.[0]?.message?.content });
     }
 
     // =================================================================
@@ -168,8 +170,8 @@ export default async function handler(req, res) {
     return res.status(400).json({ error: 'Invalid mode' });
 
   } catch (error) {
-    console.error("Server Error:", error);
+    console.error("Critical Server Error:", error);
     return res.status(500).json({ error: error.message });
   }
-        }
-                
+                         }
+    
