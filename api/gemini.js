@@ -1,12 +1,11 @@
-// api/gemini.js - ULTRA ROBUST CASCADE (405B -> 70B -> 8B)
-// Designed to beat Vercel's 10s Timeout
+// api/gemini.js - POWERFUL VOICE & INTELLIGENT CHAT BACKEND
 
 export const config = {
-  maxDuration: 60, // Pro plan ke liye 60s, Free ke liye usually 10s hi rehta hai
+  maxDuration: 60, // Voice processing needs time
 };
 
 export default async function handler(req, res) {
-  // 1. CORS Headers (Browser access ke liye)
+  // 1. CORS Headers (Allow browser connection)
   res.setHeader('Access-Control-Allow-Origin', '*');
   res.setHeader('Access-Control-Allow-Methods', 'POST, OPTIONS');
   res.setHeader('Access-Control-Allow-Headers', 'Content-Type');
@@ -18,127 +17,139 @@ export default async function handler(req, res) {
     const { mode, contents, systemInstruction } = req.body;
 
     // =================================================================
-    // 🎤 MODE 1: VOICE / AUDIO (Powered by Google Gemini 2.0 Flash)
+    // 🎤 MODE 1: VOICE / AUDIO (Human-Like Conversation)
+    // Uses Google Gemini 2.0 Flash (Stable)
     // =================================================================
-    // Check if input has audio data
-    const hasAudioInput = contents?.[0]?.parts?.some(p => p.inlineData && p.inlineData.mimeType.startsWith('audio'));
     
-    if (mode === 'tts' || (mode === 'text' && hasAudioInput)) {
-        const googleKey = process.env.GOOGLE_API_KEY;
-        if (!googleKey) return res.status(500).json({ error: 'GOOGLE_API_KEY missing in Vercel' });
+    // Check if the user sent Audio input OR requested TTS (Text-to-Speech)
+    const hasAudioInput = contents?.[0]?.parts?.some(p => p.inlineData && p.inlineData.mimeType.startsWith('audio'));
+    const isTTSRequest = mode === 'tts';
 
-        let sysPromptText = "You are a helpful tutor. Reply naturally in Hindi/English mix.";
-        if (systemInstruction?.parts?.[0]?.text) sysPromptText = systemInstruction.parts[0].text;
-        sysPromptText += " (Keep answers concise for voice output.)";
+    if (isTTSRequest || (mode === 'text' && hasAudioInput)) {
+        const googleKey = process.env.GOOGLE_API_KEY;
+        if (!googleKey) return res.status(500).json({ error: 'GOOGLE_API_KEY missing in Vercel Settings' });
+
+        // 🧠 System Prompt for Voice
+        let sysPromptText = "You are PadhaiSetu, a friendly and energetic Indian tutor.";
+        if (systemInstruction?.parts?.[0]?.text) {
+            sysPromptText = systemInstruction.parts[0].text;
+        }
+        // Strict Voice Instructions
+        sysPromptText += " (IMPORTANT: Reply in a natural, human-like voice. Use mixed Hindi-English (Hinglish) if the user speaks it. Keep answers concise and conversational. Do not read out markdown symbols like asterisks.)";
 
         try {
-            const response = await fetch(`https://generativelanguage.googleapis.com/v1beta/models/gemini-2.0-flash:generateContent?key=${googleKey}`, {
+            // 🔥 Using the STABLE Gemini 2.0 Flash model
+            const modelName = "gemini-2.0-flash"; 
+            
+            console.log(`🎤 Calling Voice Model: ${modelName}`);
+            
+            const response = await fetch(`https://generativelanguage.googleapis.com/v1beta/models/${modelName}:generateContent?key=${googleKey}`, {
                 method: 'POST',
                 headers: { 'Content-Type': 'application/json' },
                 body: JSON.stringify({
-                    contents: contents,
+                    contents: contents, // User's Audio or Text
                     systemInstruction: { parts: [{ text: sysPromptText }] },
                     generationConfig: {
-                        temperature: 0.7,
-                        responseModalities: ["AUDIO"] // 🔥 Direct Audio Response
+                        temperature: 0.9, // Higher temperature for more natural speech
+                        responseModalities: ["AUDIO"] // 🔥 Force Direct Audio Response
                     }
                 })
             });
 
-            const data = await response.json();
-            const audioData = data.candidates?.[0]?.content?.parts?.[0]?.inlineData?.data;
-            const textData = data.candidates?.[0]?.content?.parts?.[0]?.text;
+            if (!response.ok) {
+                const errText = await response.text();
+                throw new Error(`Google API Error: ${errText}`);
+            }
 
-            if (audioData) return res.status(200).json({ audio: audioData, text: "🎤 Voice Response" });
-            if (textData) return res.status(200).json({ text: textData });
-            throw new Error("Gemini Voice Failed");
+            const data = await response.json();
+            
+            // Extract Audio Data
+            const audioData = data.candidates?.[0]?.content?.parts?.[0]?.inlineData?.data;
+            
+            if (audioData) {
+                // Success! Send audio back to frontend
+                return res.status(200).json({ audio: audioData, text: "🎤 Voice Response" });
+            } else {
+                throw new Error("No audio returned from Gemini");
+            }
+
         } catch (e) {
-            console.error("Voice Error:", e);
-            // Fallback to text mode if voice fails
+            console.error("Voice Mode Error:", e.message);
+            // Fallback: If 2.0 Flash fails, try 1.5 Flash (Backup)
+            try {
+                console.log("🔄 Trying Backup Model: gemini-1.5-flash");
+                const backupResponse = await fetch(`https://generativelanguage.googleapis.com/v1beta/models/gemini-1.5-flash:generateContent?key=${googleKey}`, {
+                    method: 'POST',
+                    headers: { 'Content-Type': 'application/json' },
+                    body: JSON.stringify({
+                        contents: contents,
+                        systemInstruction: { parts: [{ text: sysPromptText }] },
+                        generationConfig: { responseModalities: ["AUDIO"] }
+                    })
+                });
+                const backupData = await backupResponse.json();
+                const backupAudio = backupData.candidates?.[0]?.content?.parts?.[0]?.inlineData?.data;
+                if (backupAudio) return res.status(200).json({ audio: backupAudio });
+            } catch (backupErr) {
+                return res.status(500).json({ error: "Voice service unavailable. Please use text mode." });
+            }
         }
     }
 
     // =================================================================
-    // 🧠 MODE 2: INTELLIGENT TEXT (Cascading Llama Models)
+    // 🧠 MODE 2: TEXT CHAT (Deep Thinking)
+    // Uses Llama 405B -> 70B -> 8B Cascade
     // =================================================================
     if (mode === 'text') {
       const sambaKey = process.env.SAMBANOVA_KEY;
       if (!sambaKey) return res.status(500).json({ error: 'SAMBANOVA_KEY missing' });
 
-      // 1. Prepare Prompts
       let finalSystemPrompt = "You are a helpful AI tutor.";
-      if (systemInstruction?.parts?.[0]?.text) {
-          finalSystemPrompt = systemInstruction.parts[0].text;
-      }
-      // 🔥 Force JSON/Table formatting rules in backend too
-      finalSystemPrompt += "\n\n[SYSTEM RULE: If asked for difference/comparison, USE MARKDOWN TABLE. If math, use step-by-step.]";
+      if (systemInstruction?.parts?.[0]?.text) finalSystemPrompt = systemInstruction.parts[0].text;
+      
+      // Strict Formatting Rules for Text Mode
+      finalSystemPrompt += "\n\n[SYSTEM RULE: If asked for difference/comparison, USE MARKDOWN TABLE. If math/physics, use step-by-step logic.]";
 
-      // 2. Prepare User Message
       let userMessage = contents[0].parts.map(p => p.text).join('\n');
       const messages = [
         { role: "system", content: finalSystemPrompt },
         { role: "user", content: userMessage }
       ];
 
-      // 🔥 HELPER: Smart Fetch with Timeout
+      // Helper for Llama Calls
       const callSambaNova = async (modelId, timeoutMs) => {
           const controller = new AbortController();
           const timeoutId = setTimeout(() => controller.abort(), timeoutMs);
-          
           try {
-              console.log(`Attempting Model: ${modelId} with timeout ${timeoutMs}ms`);
               const response = await fetch("https://api.sambanova.ai/v1/chat/completions", {
                   method: "POST",
-                  headers: {
-                      "Authorization": `Bearer ${sambaKey}`,
-                      "Content-Type": "application/json"
-                  },
-                  body: JSON.stringify({
-                      model: modelId,
-                      messages: messages,
-                      temperature: 0.7,
-                      top_p: 0.9,
-                      max_tokens: 1500
-                  }),
+                  headers: { "Authorization": `Bearer ${sambaKey}`, "Content-Type": "application/json" },
+                  body: JSON.stringify({ model: modelId, messages: messages, temperature: 0.7, top_p: 0.9, max_tokens: 1500 }),
                   signal: controller.signal
               });
               clearTimeout(timeoutId);
-              
               if (!response.ok) throw new Error(`API Status: ${response.status}`);
               const data = await response.json();
               return data.choices?.[0]?.message?.content || null;
-          } catch (error) {
-              clearTimeout(timeoutId);
-              throw error; // Pass error to next catcher
-          }
+          } catch (error) { clearTimeout(timeoutId); throw error; }
       };
 
-      // 🚀 THE CASCADE STRATEGY (Time-Bound)
       try {
-          // Attempt 1: The Beast (405B) - Timeout 6s (Strict for Vercel Free Tier)
+          // 1. Try 405B (The Beast) - 6s Timeout
           const text405 = await callSambaNova("Meta-Llama-3.1-405B-Instruct", 6000);
           if (text405) return res.status(200).json({ text: text405 });
-
       } catch (err405) {
-          console.warn("⚠️ 405B Failed/Timeout. Switching to 70B...", err405.name);
-          
+          console.warn("405B busy, switching to 70B...");
           try {
-              // Attempt 2: The Genius (70B) - Timeout 5s (Faster fallback)
-              // 70B is almost as smart as GPT-4 but much faster than 405B
+              // 2. Try 70B (The Genius) - 5s Timeout
               const text70 = await callSambaNova("Meta-Llama-3.3-70B-Instruct", 5000);
               if (text70) return res.status(200).json({ text: text70 });
-
           } catch (err70) {
-              console.warn("⚠️ 70B Failed. Switching to 8B...", err70.name);
-              
               try {
-                  // Attempt 3: The Flash (8B) - Timeout 3s (Last Resort)
+                  // 3. Try 8B (The Rocket) - 4s Timeout
                   const text8 = await callSambaNova("Meta-Llama-3.1-8B-Instruct", 4000);
                   if (text8) return res.status(200).json({ text: text8 });
-                  
-              } catch (err8) {
-                  return res.status(500).json({ error: "All AI models are busy. Please try again in 5 seconds." });
-              }
+              } catch (e) { return res.status(500).json({ error: "AI is currently overloaded. Please try again." }); }
           }
       }
     }
@@ -157,8 +168,8 @@ export default async function handler(req, res) {
     return res.status(400).json({ error: 'Invalid mode' });
 
   } catch (error) {
-    console.error("Critical Server Error:", error);
+    console.error("Server Error:", error);
     return res.status(500).json({ error: error.message });
   }
-          }
-              
+        }
+                
