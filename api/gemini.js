@@ -1,7 +1,7 @@
-// api/gemini.js - THE MASTER KEY FIX
-// Mic: Sends as 'octet-stream' (Deepgram will auto-detect Android/PC/iOS)
-// Brain: Pollinations (Free)
-// Speaker: Deepgram Aura
+// api/gemini.js - HYBRID VOICE ENGINE (Indian Accent Fix)
+// 1. English -> Deepgram Aura (Human-like)
+// 2. Hindi/Gujarati -> Google TTS API (Correct Pronunciation)
+// 3. Brain -> Pollinations (Free)
 
 export const config = {
   maxDuration: 60,
@@ -21,8 +21,12 @@ export default async function handler(req, res) {
     const { mode, contents, systemInstruction } = req.body;
     const DEEPGRAM_KEY = process.env.DEEPGRAM_API_KEY;
 
-    // Check Key
-    if (!DEEPGRAM_KEY) return res.status(500).json({ error: "Deepgram Key Missing" });
+    // 🔥 HELPER: Language Detector
+    const detectLanguage = (text) => {
+        if (/[\u0900-\u097F]/.test(text)) return 'hi'; // Hindi
+        if (/[\u0A80-\u0AFF]/.test(text)) return 'gu'; // Gujarati
+        return 'en'; // Default to English
+    };
 
     // 🔥 HELPER: Pollinations AI (Free Brain)
     const thinkWithPollinations = async (messages) => {
@@ -53,13 +57,13 @@ export default async function handler(req, res) {
     if (isTTSRequest || (mode === 'text' && hasAudioInput)) {
         let userText = "";
 
-        // PART A: SUNNA (Deepgram Universal Fix)
+        // PART A: SUNNA (Deepgram Universal)
         if (hasAudioInput && !isTTSRequest) {
             const audioPart = contents[0].parts.find(p => p.inlineData);
             const audioBuffer = Buffer.from(audioPart.inlineData.data, 'base64');
             try {
-                // 👇 MASTER FIX: 'application/octet-stream'
-                // Iska matlab Deepgram file ka header khud check karega (Magic!)
+                if (!DEEPGRAM_KEY) throw new Error("Key Missing");
+                
                 const sttResponse = await fetch("https://api.deepgram.com/v1/listen?model=nova-2&smart_format=true&language=en-IN", {
                     method: "POST",
                     headers: { 
@@ -69,17 +73,13 @@ export default async function handler(req, res) {
                     body: audioBuffer
                 });
 
-                if (!sttResponse.ok) {
-                    const err = await sttResponse.text();
-                    console.error("Deepgram Error:", err);
-                    throw new Error(`Deepgram Error: ${sttResponse.status}`);
-                }
+                if (!sttResponse.ok) throw new Error("Mic Error");
                 const sttData = await sttResponse.json();
                 userText = sttData.results?.channels?.[0]?.alternatives?.[0]?.transcript;
                 
                 if (!userText) return res.status(200).json({ text: "...", audio: null });
             } catch (e) {
-                return res.status(200).json({ text: `Mic Error: ${e.message}`, audio: null });
+                return res.status(200).json({ text: "Mic Error. Check Key.", audio: null });
             }
         } else if (isTTSRequest) {
             userText = contents[0].parts[0].text;
@@ -97,19 +97,41 @@ export default async function handler(req, res) {
             ]);
         }
 
-        // PART C: BOLNA (Deepgram Aura TTS)
+        // PART C: BOLNA (Smart Hybrid TTS) 🗣️
         try {
-            const ttsResponse = await fetch("https://api.deepgram.com/v1/speak?model=aura-asteria-en", {
-                method: "POST",
-                headers: { "Authorization": `Token ${DEEPGRAM_KEY}`, "Content-Type": "application/json" },
-                body: JSON.stringify({ text: replyText.replace(/[*#]/g, '') })
+            const lang = detectLanguage(replyText);
+            let audioBase64 = null;
+
+            if (lang === 'en' && DEEPGRAM_KEY) {
+                // 👉 ENGLISH? Use Deepgram (Best Quality)
+                const ttsResponse = await fetch("https://api.deepgram.com/v1/speak?model=aura-asteria-en", {
+                    method: "POST",
+                    headers: { "Authorization": `Token ${DEEPGRAM_KEY}`, "Content-Type": "application/json" },
+                    body: JSON.stringify({ text: replyText.replace(/[*#]/g, '') })
+                });
+                if (ttsResponse.ok) {
+                    const arrayBuffer = await ttsResponse.arrayBuffer();
+                    audioBase64 = Buffer.from(arrayBuffer).toString('base64');
+                }
+            } else {
+                // 👉 HINDI/GUJARATI? Use Google TTS Hack (Better Accent)
+                // Note: Google TTS returns MP3 directly. It's free and supports Hindi perfectly.
+                const googleUrl = `https://translate.google.com/translate_tts?ie=UTF-8&q=${encodeURIComponent(replyText)}&tl=${lang}&client=tw-ob`;
+                const gResponse = await fetch(googleUrl);
+                if (gResponse.ok) {
+                    const arrayBuffer = await gResponse.arrayBuffer();
+                    audioBase64 = Buffer.from(arrayBuffer).toString('base64');
+                }
+            }
+
+            // Agar Audio mil gaya to bhejo, nahi to Text bhejo (Frontend Fallback karega)
+            return res.status(200).json({ 
+                audio: audioBase64, 
+                text: replyText 
             });
 
-            if (!ttsResponse.ok) throw new Error("TTS Failed");
-            const arrayBuffer = await ttsResponse.arrayBuffer();
-            const audioBase64 = Buffer.from(arrayBuffer).toString('base64');
-            return res.status(200).json({ audio: audioBase64, text: replyText });
         } catch (e) {
+            console.error("TTS Error:", e);
             return res.status(200).json({ text: replyText });
         }
     }
@@ -118,13 +140,7 @@ export default async function handler(req, res) {
     if (mode === 'text') {
       let sysP = "You are a helpful AI tutor.";
       if (systemInstruction?.parts?.[0]?.text) sysP = systemInstruction.parts[0].text;
-      
-      let userM = "";
-      if (contents[0].parts.length > 1 && contents[0].parts[1].text) {
-          userM = `[User sent image] ${contents[0].parts[1].text}`;
-      } else {
-          userM = contents[0].parts.map(p => p.text).join('\n');
-      }
+      let userM = contents[0].parts.map(p => p.text).join('\n');
 
       const text = await thinkWithPollinations([
           { role: "system", content: sysP },
@@ -145,4 +161,4 @@ export default async function handler(req, res) {
   } catch (error) {
     return res.status(500).json({ error: "Server Error", text: "Something went wrong." });
   }
-        }
+          }
