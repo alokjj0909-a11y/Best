@@ -1,12 +1,14 @@
-// api/gemini.js - OPTIMIZED FOR NEW HTML (Fast Text & Hybrid Voice)
+// api/gemini.js - POLLINATIONS ONLY VERSION
+// No Deepgram, No External TTS. 
+// Uses Pollinations for ChatGPT Brain and Flux Image.
 
 export const config = {
-  maxDuration: 60, // Vercel limit
+  maxDuration: 60,
   api: { bodyParser: { sizeLimit: '4mb' } },
 };
 
 export default async function handler(req, res) {
-  // 1. Security Headers (CORS)
+  // CORS Headers
   res.setHeader('Access-Control-Allow-Origin', '*');
   res.setHeader('Access-Control-Allow-Methods', 'POST, OPTIONS');
   res.setHeader('Access-Control-Allow-Headers', 'Content-Type');
@@ -15,26 +17,9 @@ export default async function handler(req, res) {
   if (req.method !== 'POST') return res.status(405).json({ error: 'Method Not Allowed' });
 
   try {
-    const { mode, contents, voiceId, systemInstruction } = req.body;
-    const DEEPGRAM_KEY = process.env.DEEPGRAM_API_KEY;
+    const { mode, contents, systemInstruction } = req.body;
 
-    // 🔥 1. CHARACTER VOICE MAPPING (HTML se matching)
-    const voiceMap = {
-        'Aoede': 'aura-asteria-en',  // Badi Didi (Soft Female)
-        'Fenrir': 'aura-orion-en',   // Bada Bhai (Confident Male)
-        'Iapetus': 'aura-arc-en',    // Dost (Cool Male)
-        'Orus': 'aura-perseus-en'    // Sir (Deep Male)
-    };
-    // Default fallback
-    const selectedModel = voiceMap[voiceId] || 'aura-asteria-en';
-
-    // 🔥 2. HELPER: Indian Language Detector
-    const isIndianLanguage = (text) => {
-        // Checks for Hindi, Gujarati, Marathi, etc. characters
-        return /[\u0900-\u097F\u0A80-\u0AFF]/.test(text);
-    };
-
-    // 🔥 3. HELPER: Pollinations AI (The Brain)
+    // 🔥 1. BRAIN: Pollinations ChatGPT Helper
     const thinkWithPollinations = async (messages) => {
         try {
             const response = await fetch('https://text.pollinations.ai/', {
@@ -42,68 +27,36 @@ export default async function handler(req, res) {
                 headers: { 'Content-Type': 'application/json' },
                 body: JSON.stringify({
                     messages: messages,
-                    model: 'openai', 
+                    model: 'openai', // Using ChatGPT model
                     seed: Math.floor(Math.random() * 1000)
                 })
             });
-            if (!response.ok) throw new Error("Pollinations Error");
+            if (!response.ok) throw new Error("Pollinations Brain Error");
             const text = await response.text();
-            return text || "Thinking...";
+            return text || "Maafi chahta hoon, main samajh nahi paya.";
         } catch (e) {
-            return "Connection weak. Please retry.";
+            return "Connection weak. Please try again.";
         }
     };
 
     // =================================================================
-    // 🎤 MAIN LOGIC: TEXT & VOICE HANDLING
+    // 🎤 MODE: TEXT & TTS REQUESTS
     // =================================================================
-    const hasAudioInput = contents?.[0]?.parts?.some(p => p.inlineData && p.inlineData.mimeType.startsWith('audio'));
-    const isTTSRequest = mode === 'tts';
-
-    if (isTTSRequest || mode === 'text') {
+    if (mode === 'text' || mode === 'tts') {
         let userText = "";
 
-        // 👉 STEP A: LISTENING (Deepgram STT) - Only if Mic used
-        if (hasAudioInput && !isTTSRequest) {
-            const audioPart = contents[0].parts.find(p => p.inlineData);
-            const audioBuffer = Buffer.from(audioPart.inlineData.data, 'base64');
-            try {
-                if (!DEEPGRAM_KEY) throw new Error("Deepgram Key Missing");
-                
-                // 🛠️ FIX: 'octet-stream' prevents Android Mic Errors
-                const sttResponse = await fetch("https://api.deepgram.com/v1/listen?model=nova-2&smart_format=true&language=en-IN", {
-                    method: "POST",
-                    headers: { 
-                        "Authorization": `Token ${DEEPGRAM_KEY}`,
-                        "Content-Type": "application/octet-stream" 
-                    },
-                    body: audioBuffer
-                });
-
-                if (!sttResponse.ok) throw new Error("Mic Error");
-                const sttData = await sttResponse.json();
-                userText = sttData.results?.channels?.[0]?.alternatives?.[0]?.transcript;
-                
-                if (!userText) return res.status(200).json({ text: "...", audio: null });
-            } catch (e) {
-                return res.status(200).json({ text: "Mic format error. Please Reload.", audio: null });
-            }
+        // Text input extraction
+        if (mode === 'tts') {
+            userText = contents[0].parts[0].text;
         } else {
-            // Text Input Handling
-            if (isTTSRequest) {
-                userText = contents[0].parts[0].text; // Direct text for TTS
-            } else if (contents[0].parts.length > 1 && contents[0].parts[1].text) {
-                userText = `[User sent image] ${contents[0].parts[1].text}`; // Image Analysis
-            } else {
-                userText = contents[0].parts.map(p => p.text).join('\n'); // Plain Text
-            }
+            // Normal chat or Image analysis (handled as text prompt)
+            userText = contents[0].parts.map(p => p.text || "[Attachment]").join('\n');
         }
 
-        // 👉 STEP B: THINKING (Pollinations AI)
-        // Agar TTS request hai (Smart Class se), toh sochna skip karo, seedha text lo.
+        // Processing with AI
         let replyText = userText;
-        if (!isTTSRequest && userText) {
-            let sysPrompt = "You are PadhaiSetu. Reply in Hinglish. Keep it short.";
+        if (mode !== 'tts') {
+            let sysPrompt = "You are PadhaiSetu, a helpful human-like AI tutor. Reply in the same language as the user.";
             if (systemInstruction?.parts?.[0]?.text) sysPrompt = systemInstruction.parts[0].text;
 
             replyText = await thinkWithPollinations([
@@ -112,47 +65,20 @@ export default async function handler(req, res) {
             ]);
         }
 
-        // 👉 STEP C: SPEAKING (Hybrid System)
-        try {
-            // Rule 1: Indian Language? -> Send NULL Audio.
-            // (Frontend will use Phone's Voice for Hindi/Gujarati)
-            if (isIndianLanguage(replyText)) {
-                return res.status(200).json({ 
-                    text: replyText, 
-                    audio: null 
-                });
-            } 
-            
-            // Rule 2: English? -> Use Deepgram with Character Voice.
-            if (!DEEPGRAM_KEY) throw new Error("No Key");
-            
-            const ttsResponse = await fetch(`https://api.deepgram.com/v1/speak?model=${selectedModel}`, {
-                method: "POST",
-                headers: { "Authorization": `Token ${DEEPGRAM_KEY}`, "Content-Type": "application/json" },
-                body: JSON.stringify({ text: replyText.replace(/[*#]/g, '') })
-            });
-
-            if (ttsResponse.ok) {
-                const arrayBuffer = await ttsResponse.arrayBuffer();
-                const audioBase64 = Buffer.from(arrayBuffer).toString('base64');
-                return res.status(200).json({ audio: audioBase64, text: replyText });
-            } else {
-                // Fallback to browser voice if Deepgram fails
-                return res.status(200).json({ text: replyText, audio: null });
-            }
-
-        } catch (e) {
-            return res.status(200).json({ text: replyText, audio: null });
-        }
+        // ✅ OUTPUT: Audio set to null so Frontend Browser Voice takes over.
+        // Frontend (HTML) will use its fallbackTTS (Girl voice logic).
+        return res.status(200).json({ 
+            text: replyText, 
+            audio: null 
+        });
     }
 
     // =================================================================
-    // 🎨 MODE: IMAGE GENERATION (Backup)
+    // 🎨 MODE: IMAGE GENERATION (Pollinations Flux)
     // =================================================================
-    // Note: Frontend ab khud handle kar raha hai, par ye backup ke liye rakha hai.
     if (mode === 'image') {
        const prompt = encodeURIComponent(req.body.prompt || "education");
-       // Pollinations Flux Model
+       // Creating direct HD Flux image URL
        const imageUrl = `https://image.pollinations.ai/prompt/${prompt}?nologo=true&model=flux&width=1024&height=1024&seed=${Math.floor(Math.random()*1000)}`;
        return res.status(200).json({ image: imageUrl });
     }
@@ -161,6 +87,6 @@ export default async function handler(req, res) {
 
   } catch (error) {
     console.error("Server Error:", error);
-    return res.status(500).json({ error: "Server Error", text: "System overload." });
+    return res.status(500).json({ error: "Server Error", text: "Kuch gadbad ho gayi hai." });
   }
-        }
+}
