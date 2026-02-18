@@ -1,7 +1,7 @@
-// api/gemini.js - FINAL GOLDEN VERSION
-// 1. Mic: Supports 'audio/webm' (Fixes Mobile/Android issues)
-// 2. Brain: Pollinations AI (Unlimited Free Thinking)
-// 3. Speaker: Deepgram Aura (Human-like Voice)
+// api/gemini.js - AUTO-DETECT FORMAT (Fixes 'Mic format error')
+// 1. Mic: Auto-detects ANY audio format (WebM, MP4, WAV, OGG)
+// 2. Brain: Pollinations AI (Free)
+// 3. Speaker: Deepgram Aura
 
 export const config = {
   maxDuration: 60,
@@ -9,7 +9,7 @@ export const config = {
 };
 
 export default async function handler(req, res) {
-  // CORS Headers (Browser connection ke liye zaroori)
+  // CORS Headers
   res.setHeader('Access-Control-Allow-Origin', '*');
   res.setHeader('Access-Control-Allow-Methods', 'POST, OPTIONS');
   res.setHeader('Access-Control-Allow-Headers', 'Content-Type');
@@ -21,7 +21,6 @@ export default async function handler(req, res) {
     const { mode, contents, systemInstruction } = req.body;
     const DEEPGRAM_KEY = process.env.DEEPGRAM_API_KEY;
 
-    // Check Key
     if (!DEEPGRAM_KEY) return res.status(500).json({ error: "Deepgram Key Missing" });
 
     // 🔥 HELPER: Pollinations AI (Free Brain)
@@ -32,22 +31,20 @@ export default async function handler(req, res) {
                 headers: { 'Content-Type': 'application/json' },
                 body: JSON.stringify({
                     messages: messages,
-                    model: 'openai', // Free & Smart (GPT-4o-Mini equivalent)
+                    model: 'openai', 
                     seed: Math.floor(Math.random() * 1000)
                 })
             });
-
             if (!response.ok) throw new Error("Pollinations Error");
             const text = await response.text();
             return text || "Thinking...";
         } catch (e) {
-            console.error("Brain Error:", e);
-            return "Connection weak. Please try again.";
+            return "Connection weak.";
         }
     };
 
     // =================================================================
-    // 🎤 MODE 1: VOICE / AUDIO PROCESSING
+    // 🎤 MODE 1: VOICE PROCESSING
     // =================================================================
     const hasAudioInput = contents?.[0]?.parts?.some(p => p.inlineData && p.inlineData.mimeType.startsWith('audio'));
     const isTTSRequest = mode === 'tts';
@@ -55,41 +52,39 @@ export default async function handler(req, res) {
     if (isTTSRequest || (mode === 'text' && hasAudioInput)) {
         let userText = "";
 
-        // PART A: SUNNA (Deepgram STT)
+        // PART A: SUNNA (Deepgram Auto-Detect)
         if (hasAudioInput && !isTTSRequest) {
             const audioPart = contents[0].parts.find(p => p.inlineData);
             const audioBuffer = Buffer.from(audioPart.inlineData.data, 'base64');
             try {
-                // 👇 CRITICAL FIX: 'audio/webm' for Android/Mobile
+                // 👇 BIG FIX: Removed 'Content-Type'. Deepgram will auto-detect now!
                 const sttResponse = await fetch("https://api.deepgram.com/v1/listen?model=nova-2&smart_format=true&language=en-IN", {
                     method: "POST",
                     headers: { 
-                        "Authorization": `Token ${DEEPGRAM_KEY}`,
-                        "Content-Type": "audio/webm" // ✅ Ye Android ke liye zaroori hai
+                        "Authorization": `Token ${DEEPGRAM_KEY}`
+                        // "Content-Type": "audio/webm" <--- HATA DIYA (Auto-Detect ON)
                     },
                     body: audioBuffer
                 });
 
                 if (!sttResponse.ok) {
-                    const errText = await sttResponse.text();
-                    console.error("Deepgram STT Error:", errText);
+                    const err = await sttResponse.text();
+                    console.error("Deepgram Error:", err);
                     throw new Error("Mic Error");
                 }
                 const sttData = await sttResponse.json();
                 userText = sttData.results?.channels?.[0]?.alternatives?.[0]?.transcript;
                 
-                // Agar kuch sunayi nahi diya
                 if (!userText) return res.status(200).json({ text: "...", audio: null });
-
             } catch (e) {
+                // Agar Deepgram fail ho, to error dikhao taaki pata chale
                 return res.status(200).json({ text: "Mic format error. Please reload.", audio: null });
             }
         } else if (isTTSRequest) {
-            // Agar seedha bolne (TTS) ke liye aaya hai (Smart Class / Swadhyay)
             userText = contents[0].parts[0].text;
         }
 
-        // PART B: SOCHNA (Pollinations AI) - Only if not direct TTS
+        // PART B: SOCHNA (Pollinations AI)
         let replyText = userText;
         if (!isTTSRequest && userText) {
             let sysPrompt = "You are PadhaiSetu. Reply in Hinglish. Keep it short.";
@@ -110,31 +105,22 @@ export default async function handler(req, res) {
             });
 
             if (!ttsResponse.ok) throw new Error("TTS Failed");
-            
             const arrayBuffer = await ttsResponse.arrayBuffer();
             const audioBase64 = Buffer.from(arrayBuffer).toString('base64');
-
-            // Success! Audio (MP3) aur Text dono bhejo
             return res.status(200).json({ audio: audioBase64, text: replyText });
-
         } catch (e) {
-            console.error("TTS Error:", e);
-            // Agar Audio fail ho, to kam se kam Text bhejo
             return res.status(200).json({ text: replyText });
         }
     }
 
-    // =================================================================
-    // 🧠 MODE 2: TEXT CHAT (Pollinations AI)
-    // =================================================================
+    // Text Mode
     if (mode === 'text') {
       let sysP = "You are a helpful AI tutor.";
       if (systemInstruction?.parts?.[0]?.text) sysP = systemInstruction.parts[0].text;
       
       let userM = "";
-      // Handle Image+Text or just Text
       if (contents[0].parts.length > 1 && contents[0].parts[1].text) {
-          userM = `[User sent an image] ${contents[0].parts[1].text}`;
+          userM = `[User sent image] ${contents[0].parts[1].text}`;
       } else {
           userM = contents[0].parts.map(p => p.text).join('\n');
       }
@@ -143,16 +129,12 @@ export default async function handler(req, res) {
           { role: "system", content: sysP },
           { role: "user", content: userM }
       ]);
-      
       return res.status(200).json({ text: text });
     }
 
-    // =================================================================
-    // 🎨 MODE 3: IMAGE GENERATION (Pollinations Flux)
-    // =================================================================
+    // Image Mode
     if (mode === 'image') {
        const prompt = encodeURIComponent(req.body.prompt || "education");
-       // Pollinations ka Naya Flux Model (Best Quality)
        const imageUrl = `https://image.pollinations.ai/prompt/${prompt}?nologo=true&model=flux&width=1024&height=1024&seed=${Math.floor(Math.random()*1000)}`;
        return res.status(200).json({ image: imageUrl });
     }
@@ -160,7 +142,6 @@ export default async function handler(req, res) {
     return res.status(400).json({ error: 'Invalid mode' });
 
   } catch (error) {
-    console.error("Critical Server Error:", error);
     return res.status(500).json({ error: "Server Error", text: "Something went wrong." });
   }
-          }
+                                         }
