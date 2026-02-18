@@ -1,5 +1,5 @@
-// api/gemini.js - GOLDEN EDITION (Pollinations Brain + Deepgram Voice)
-// Fixes: Mic Format (WebM for Android) & Thinking (Free OpenAI)
+// api/gemini.js - ANDROID VOICE FIX (WebM Format)
+// Mic: WebM (Works on Android phones) | Brain: Pollinations (Free)
 
 export const config = {
   maxDuration: 60,
@@ -7,6 +7,7 @@ export const config = {
 };
 
 export default async function handler(req, res) {
+  // CORS Headers
   res.setHeader('Access-Control-Allow-Origin', '*');
   res.setHeader('Access-Control-Allow-Methods', 'POST, OPTIONS');
   res.setHeader('Access-Control-Allow-Headers', 'Content-Type');
@@ -20,7 +21,7 @@ export default async function handler(req, res) {
 
     if (!DEEPGRAM_KEY) return res.status(500).json({ error: "Deepgram Key Missing" });
 
-    // 🔥 HELPER: Pollinations AI (The Free Brain)
+    // 🔥 HELPER: Pollinations AI (Free Brain)
     const thinkWithPollinations = async (messages) => {
         try {
             const response = await fetch('https://text.pollinations.ai/', {
@@ -28,15 +29,15 @@ export default async function handler(req, res) {
                 headers: { 'Content-Type': 'application/json' },
                 body: JSON.stringify({
                     messages: messages,
-                    model: 'openai', // GPT-4o-Mini (Smart & Free)
+                    model: 'openai', // Free & Smart
                     seed: Math.floor(Math.random() * 1000)
                 })
             });
             if (!response.ok) throw new Error("Pollinations Error");
             const text = await response.text();
-            return text || "Hmm...";
+            return text || "Thinking...";
         } catch (e) {
-            return "Thinking...";
+            return "Connection weak.";
         }
     };
 
@@ -49,17 +50,17 @@ export default async function handler(req, res) {
     if (isTTSRequest || (mode === 'text' && hasAudioInput)) {
         let userText = "";
 
-        // 1. SUNNA (Deepgram - Android Friendly)
+        // 1. SUNNA (Deepgram)
         if (hasAudioInput && !isTTSRequest) {
             const audioPart = contents[0].parts.find(p => p.inlineData);
             const audioBuffer = Buffer.from(audioPart.inlineData.data, 'base64');
             try {
-                // 👇 BIG FIX: 'audio/webm' is what Android sends!
+                // 👇 YAHAN HAI MAGIC FIX: 'audio/webm' (Android Format)
                 const sttResponse = await fetch("https://api.deepgram.com/v1/listen?model=nova-2&smart_format=true&language=en-IN", {
                     method: "POST",
                     headers: { 
                         "Authorization": `Token ${DEEPGRAM_KEY}`,
-                        "Content-Type": "audio/webm" // ✅ Ye Android ke liye zaroori hai
+                        "Content-Type": "audio/webm" // ✅ Correct format for Phone
                     },
                     body: audioBuffer
                 });
@@ -70,24 +71,13 @@ export default async function handler(req, res) {
                 
                 if (!userText) return res.status(200).json({ text: "...", audio: null });
             } catch (e) {
-                // Agar WebM fail ho, to auto-detect try karo (Backup)
-                 try {
-                    const sttRetry = await fetch("https://api.deepgram.com/v1/listen?model=nova-2&smart_format=true&language=en-IN", {
-                        method: "POST",
-                        headers: { "Authorization": `Token ${DEEPGRAM_KEY}` }, // No content-type (Auto)
-                        body: audioBuffer
-                    });
-                    const retryData = await sttRetry.json();
-                    userText = retryData.results?.channels?.[0]?.alternatives?.[0]?.transcript;
-                 } catch(err) {
-                    return res.status(200).json({ text: "Mic problem.", audio: null });
-                 }
+                return res.status(200).json({ text: "Mic format error.", audio: null });
             }
         } else if (isTTSRequest) {
             userText = contents[0].parts[0].text;
         }
 
-        // 2. SOCHNA (Pollinations AI)
+        // 2. SOCHNA (Pollinations)
         let replyText = userText;
         if (!isTTSRequest && userText) {
             let sysPrompt = "You are PadhaiSetu. Reply in Hinglish. Keep it short.";
@@ -99,7 +89,7 @@ export default async function handler(req, res) {
             ]);
         }
 
-        // 3. BOLNA (Deepgram Aura - The Human Voice)
+        // 3. BOLNA (Deepgram Aura)
         try {
             const ttsResponse = await fetch("https://api.deepgram.com/v1/speak?model=aura-asteria-en", {
                 method: "POST",
@@ -135,6 +125,6 @@ export default async function handler(req, res) {
     return res.status(400).json({ error: 'Invalid mode' });
 
   } catch (error) {
-    return res.status(500).json({ error: "Server Error", text: "Error." });
+    return res.status(500).json({ error: "Server Error", text: "Something went wrong." });
   }
-                                                 }
+              }
