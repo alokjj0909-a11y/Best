@@ -1,4 +1,4 @@
-// api/gemini.js - THE MASTER KEY FIX (For GitHub)
+// api/gemini.js - THE MASTER KEY FIX
 // Mic: Sends as 'octet-stream' (Deepgram will auto-detect Android/PC/iOS)
 // Brain: Pollinations (Free)
 // Speaker: Deepgram Aura
@@ -145,4 +145,4 @@ export default async function handler(req, res) {
   } catch (error) {
     return res.status(500).json({ error: "Server Error", text: "Something went wrong." });
   }
-    }
+        }
