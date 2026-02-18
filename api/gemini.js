@@ -4,43 +4,57 @@ export default async function handler(req, res) {
   }
 
   try {
-    const userText =
-      req.body?.contents?.[0]?.parts?.[0]?.text || "Hello";
+    const { message, persona } = req.body;
 
-    const hfRes = await fetch(
-      "https://api-inference.huggingface.co/models/mistralai/Mistral-7B-Instruct-v0.2",
+    if (!message || message.trim() === "") {
+      return res.status(400).json({ text: "No message provided" });
+    }
+
+    // 🎭 Persona system prompt
+    const systemPrompt =
+      persona === "Badi Didi"
+        ? "Tum ek caring badi didi ho jo students ko simple Hindi/Hinglish me padhati ho."
+        : "Tum ek helpful study assistant ho.";
+
+    // 🧠 MODEL SELECT (fast + free-friendly)
+    const MODEL = "google/gemini-2.5-flash-lite";
+    // 👉 baad me change kar sakta hai:
+    // "qwen/qwen2.5-7b"
+    // "mistral/mistral-small"
+    // "openai/gpt-4o-mini"
+
+    const response = await fetch(
+      "https://api.pollinations.ai/v1/chat/completions",
       {
         method: "POST",
         headers: {
-          "Authorization": `Bearer ${process.env.HF_API_KEY}`,
-          "Content-Type": "application/json"
+          "Content-Type": "application/json",
+          "Authorization": `Bearer ${process.env.POLLINATIONS_API_KEY}`
         },
         body: JSON.stringify({
-          inputs: `You are Badi Didi from PadhaiSetu. Explain kindly in Hindi/Hinglish.\nUser: ${userText}`
+          model: MODEL,
+          messages: [
+            { role: "system", content: systemPrompt },
+            { role: "user", content: message }
+          ],
+          temperature: 0.6,
+          max_tokens: 500
         })
       }
     );
 
-    const data = await hfRes.json();
+    const data = await response.json();
 
-    console.log("HF RAW RESPONSE:", data); // 👈 VERY IMPORTANT
+    const text =
+      data?.choices?.[0]?.message?.content ||
+      "Abhi jawab nahi mila 😓";
 
-    let text = "";
+    return res.status(200).json({ text });
 
-    if (Array.isArray(data) && data[0]?.generated_text) {
-      text = data[0].generated_text;
-    } else if (data?.generated_text) {
-      text = data.generated_text;
-    } else if (data?.error) {
-      text = "Model load ho raha hai, 5–10 sec baad try karo 🙂";
-    } else {
-      text = "AI se response nahi mila 😓";
-    }
-
-    res.status(200).json({ text });
-
-  } catch (err) {
-    console.error(err);
-    res.status(500).json({ text: "Server error 😓" });
+  } catch (error) {
+    console.error("Pollinations Error:", error);
+    return res.status(500).json({
+      text: "Model load ho raha hai, 5–10 sec baad try karo 🙂"
+    });
   }
 }
