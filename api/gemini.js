@@ -1,7 +1,7 @@
-// api/gemini.js - AUTO-DETECT FORMAT (Fixes 'Mic format error')
-// 1. Mic: Auto-detects ANY audio format (WebM, MP4, WAV, OGG)
-// 2. Brain: Pollinations AI (Free)
-// 3. Speaker: Deepgram Aura
+// api/gemini.js - THE MASTER KEY FIX (For GitHub)
+// Mic: Sends as 'octet-stream' (Deepgram will auto-detect Android/PC/iOS)
+// Brain: Pollinations (Free)
+// Speaker: Deepgram Aura
 
 export const config = {
   maxDuration: 60,
@@ -21,6 +21,7 @@ export default async function handler(req, res) {
     const { mode, contents, systemInstruction } = req.body;
     const DEEPGRAM_KEY = process.env.DEEPGRAM_API_KEY;
 
+    // Check Key
     if (!DEEPGRAM_KEY) return res.status(500).json({ error: "Deepgram Key Missing" });
 
     // 🔥 HELPER: Pollinations AI (Free Brain)
@@ -52,17 +53,18 @@ export default async function handler(req, res) {
     if (isTTSRequest || (mode === 'text' && hasAudioInput)) {
         let userText = "";
 
-        // PART A: SUNNA (Deepgram Auto-Detect)
+        // PART A: SUNNA (Deepgram Universal Fix)
         if (hasAudioInput && !isTTSRequest) {
             const audioPart = contents[0].parts.find(p => p.inlineData);
             const audioBuffer = Buffer.from(audioPart.inlineData.data, 'base64');
             try {
-                // 👇 BIG FIX: Removed 'Content-Type'. Deepgram will auto-detect now!
+                // 👇 MASTER FIX: 'application/octet-stream'
+                // Iska matlab Deepgram file ka header khud check karega (Magic!)
                 const sttResponse = await fetch("https://api.deepgram.com/v1/listen?model=nova-2&smart_format=true&language=en-IN", {
                     method: "POST",
                     headers: { 
-                        "Authorization": `Token ${DEEPGRAM_KEY}`
-                        // "Content-Type": "audio/webm" <--- HATA DIYA (Auto-Detect ON)
+                        "Authorization": `Token ${DEEPGRAM_KEY}`,
+                        "Content-Type": "application/octet-stream" 
                     },
                     body: audioBuffer
                 });
@@ -70,15 +72,14 @@ export default async function handler(req, res) {
                 if (!sttResponse.ok) {
                     const err = await sttResponse.text();
                     console.error("Deepgram Error:", err);
-                    throw new Error("Mic Error");
+                    throw new Error(`Deepgram Error: ${sttResponse.status}`);
                 }
                 const sttData = await sttResponse.json();
                 userText = sttData.results?.channels?.[0]?.alternatives?.[0]?.transcript;
                 
                 if (!userText) return res.status(200).json({ text: "...", audio: null });
             } catch (e) {
-                // Agar Deepgram fail ho, to error dikhao taaki pata chale
-                return res.status(200).json({ text: "Mic format error. Please reload.", audio: null });
+                return res.status(200).json({ text: `Mic Error: ${e.message}`, audio: null });
             }
         } else if (isTTSRequest) {
             userText = contents[0].parts[0].text;
@@ -144,4 +145,4 @@ export default async function handler(req, res) {
   } catch (error) {
     return res.status(500).json({ error: "Server Error", text: "Something went wrong." });
   }
-                                         }
+    }
