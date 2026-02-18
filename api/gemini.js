@@ -1,7 +1,4 @@
-// api/gemini.js - LIGHTWEIGHT VERSION (For Puter.js Frontend)
-// 1. Mic: Deepgram STT (Fixes Android Mic Error with 'octet-stream')
-// 2. Brain: Pollinations AI (ChatGPT Mode - As requested)
-// 3. Speaker: Handled by Frontend (Puter.js), so no TTS code here.
+// api/gemini.js - THE MASTERPIECE (Supports Characters + Mic Fix)
 
 export const config = {
   maxDuration: 60,
@@ -9,7 +6,7 @@ export const config = {
 };
 
 export default async function handler(req, res) {
-  // CORS Headers
+  // 1. CORS Headers (Security Handshake)
   res.setHeader('Access-Control-Allow-Origin', '*');
   res.setHeader('Access-Control-Allow-Methods', 'POST, OPTIONS');
   res.setHeader('Access-Control-Allow-Headers', 'Content-Type');
@@ -18,10 +15,26 @@ export default async function handler(req, res) {
   if (req.method !== 'POST') return res.status(405).json({ error: 'Method Not Allowed' });
 
   try {
-    const { mode, contents, systemInstruction } = req.body;
+    const { mode, contents, voiceId, systemInstruction } = req.body;
     const DEEPGRAM_KEY = process.env.DEEPGRAM_API_KEY;
 
-    // 🔥 1. HELPER: Pollinations AI (Ye wahi ChatGPT wala code hai, same to same)
+    // 🔥 CHARACTER MAP (Frontend IDs -> Deepgram Models)
+    const voiceMap = {
+        'Aoede': 'aura-asteria-en',  // Badi Didi (Soft Female)
+        'Fenrir': 'aura-orion-en',   // Bada Bhai (Confident Male)
+        'Iapetus': 'aura-arc-en',    // Dost (Cool Male)
+        'Orus': 'aura-perseus-en'    // Sir (Deep Male)
+    };
+    
+    // Default to Didi if no ID sent
+    const selectedModel = voiceMap[voiceId] || 'aura-asteria-en';
+
+    // 🔥 HELPER: Detect Indian Languages (Hindi/Gujarati)
+    const isIndianLanguage = (text) => {
+        return /[\u0900-\u097F\u0A80-\u0AFF]/.test(text);
+    };
+
+    // 🔥 HELPER: Pollinations AI (ChatGPT Brain)
     const thinkWithPollinations = async (messages) => {
         try {
             const response = await fetch('https://text.pollinations.ai/', {
@@ -42,22 +55,23 @@ export default async function handler(req, res) {
     };
 
     // =================================================================
-    // 🎤 MODE 1: VOICE / TEXT CHAT
+    // 🎤 MODE: VOICE & TEXT INTERACTION
     // =================================================================
     const hasAudioInput = contents?.[0]?.parts?.some(p => p.inlineData && p.inlineData.mimeType.startsWith('audio'));
+    const isTTSRequest = mode === 'tts';
 
-    if (mode === 'text' || (mode === 'text' && hasAudioInput)) {
+    if (isTTSRequest || mode === 'text') {
         let userText = "";
 
-        // 👉 PART A: SUNNA (Deepgram STT) - Sirf Input ke liye
-        if (hasAudioInput) {
+        // 👉 PART A: LISTENING (Deepgram STT)
+        // Only run if user sent audio (Mic input)
+        if (hasAudioInput && !isTTSRequest) {
             const audioPart = contents[0].parts.find(p => p.inlineData);
             const audioBuffer = Buffer.from(audioPart.inlineData.data, 'base64');
             try {
-                if (!DEEPGRAM_KEY) throw new Error("Deepgram Key Missing");
+                if (!DEEPGRAM_KEY) throw new Error("Key Missing");
                 
-                // 🔥 MASTER FIX: 'application/octet-stream' 
-                // Ye Android ke WebM/WAV jhagde ko khatam karta hai.
+                // 🔥 ANDROID FIX: 'application/octet-stream'
                 const sttResponse = await fetch("https://api.deepgram.com/v1/listen?model=nova-2&smart_format=true&language=en-IN", {
                     method: "POST",
                     headers: { 
@@ -73,36 +87,68 @@ export default async function handler(req, res) {
                 
                 if (!userText) return res.status(200).json({ text: "...", audio: null });
             } catch (e) {
-                // Agar Mic fail ho, to User ko batao
-                return res.status(200).json({ text: "Mic format error. Please reload.", audio: null });
+                return res.status(200).json({ text: "Mic Error. Reload.", audio: null });
             }
         } else {
-            // Agar Audio nahi hai, to direct text uthao
-            if (contents[0].parts.length > 1 && contents[0].parts[1].text) {
-                // Image + Text case
-                userText = `[User sent image] ${contents[0].parts[1].text}`;
+            // Text Input Handling
+            if (isTTSRequest) {
+                userText = contents[0].parts[0].text; // For TTS mode
+            } else if (contents[0].parts.length > 1 && contents[0].parts[1].text) {
+                userText = `[User sent image] ${contents[0].parts[1].text}`; // Image + Text
             } else {
-                // Plain Text case
-                userText = contents[0].parts.map(p => p.text).join('\n');
+                userText = contents[0].parts.map(p => p.text).join('\n'); // Plain Text
             }
         }
 
-        // 👉 PART B: SOCHNA (Pollinations AI)
-        // Ye wahi logic hai jo aapne kaha "mat chhedna"
-        let sysPrompt = "You are PadhaiSetu. Reply in Hinglish. Keep it short.";
-        if (systemInstruction?.parts?.[0]?.text) sysPrompt = systemInstruction.parts[0].text;
+        // 👉 PART B: THINKING (Pollinations AI)
+        // Skip thinking if it's just a TTS request (Smart Class sends text directly)
+        let replyText = userText;
+        if (!isTTSRequest && userText) {
+            let sysPrompt = "You are PadhaiSetu. Reply in Hinglish. Keep it short.";
+            if (systemInstruction?.parts?.[0]?.text) sysPrompt = systemInstruction.parts[0].text;
 
-        const aiReply = await thinkWithPollinations([
-            { role: "system", content: sysPrompt },
-            { role: "user", content: userText }
-        ]);
+            replyText = await thinkWithPollinations([
+                { role: "system", content: sysPrompt },
+                { role: "user", content: userText }
+            ]);
+        }
 
-        // 👉 OUTPUT: Sirf Text bhejo (Audio ab Frontend Puter.js sambhalega)
-        return res.status(200).json({ text: aiReply });
+        // 👉 PART C: SPEAKING (Hybrid TTS)
+        try {
+            // Rule 1: Indian Language? -> Send NULL Audio.
+            // Frontend will handle it with 'speechSynthesis' (Browser Voice).
+            if (isIndianLanguage(replyText)) {
+                return res.status(200).json({ 
+                    text: replyText, 
+                    audio: null 
+                });
+            } 
+            
+            // Rule 2: English? -> Use Deepgram with selected Character Voice.
+            if (!DEEPGRAM_KEY) throw new Error("No Key");
+            
+            const ttsResponse = await fetch(`https://api.deepgram.com/v1/speak?model=${selectedModel}`, {
+                method: "POST",
+                headers: { "Authorization": `Token ${DEEPGRAM_KEY}`, "Content-Type": "application/json" },
+                body: JSON.stringify({ text: replyText.replace(/[*#]/g, '') })
+            });
+
+            if (ttsResponse.ok) {
+                const arrayBuffer = await ttsResponse.arrayBuffer();
+                const audioBase64 = Buffer.from(arrayBuffer).toString('base64');
+                return res.status(200).json({ audio: audioBase64, text: replyText });
+            } else {
+                // If Deepgram fails, fallback to browser voice
+                return res.status(200).json({ text: replyText, audio: null });
+            }
+
+        } catch (e) {
+            return res.status(200).json({ text: replyText, audio: null });
+        }
     }
 
     // =================================================================
-    // 🎨 MODE 2: IMAGE GENERATION (Pollinations Flux)
+    // 🎨 MODE: IMAGE GENERATION (Pollinations Flux)
     // =================================================================
     if (mode === 'image') {
        const prompt = encodeURIComponent(req.body.prompt || "education");
@@ -115,4 +161,4 @@ export default async function handler(req, res) {
   } catch (error) {
     return res.status(500).json({ error: "Server Error", text: "Something went wrong." });
   }
-}
+                  }
