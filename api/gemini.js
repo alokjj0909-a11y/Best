@@ -1,5 +1,5 @@
-// api/gemini.js - FINAL FIX (Free Brain + WebM Mic)
-// Brain: OpenAI (Free on Pollinations) | Mic: WebM (Android compatible)
+// api/gemini.js - GOLDEN EDITION (Pollinations Brain + Deepgram Voice)
+// Fixes: Mic Format (WebM for Android) & Thinking (Free OpenAI)
 
 export const config = {
   maxDuration: 60,
@@ -20,7 +20,7 @@ export default async function handler(req, res) {
 
     if (!DEEPGRAM_KEY) return res.status(500).json({ error: "Deepgram Key Missing" });
 
-    // 🔥 HELPER: Thinking (Using OpenAI because Gemini is Paid on Pollinations)
+    // 🔥 HELPER: Pollinations AI (The Free Brain)
     const thinkWithPollinations = async (messages) => {
         try {
             const response = await fetch('https://text.pollinations.ai/', {
@@ -28,15 +28,15 @@ export default async function handler(req, res) {
                 headers: { 'Content-Type': 'application/json' },
                 body: JSON.stringify({
                     messages: messages,
-                    model: 'openai', // ✅ FREE & BEST (GPT-4o-Mini)
+                    model: 'openai', // GPT-4o-Mini (Smart & Free)
                     seed: Math.floor(Math.random() * 1000)
                 })
             });
             if (!response.ok) throw new Error("Pollinations Error");
             const text = await response.text();
-            return text || "Thinking...";
+            return text || "Hmm...";
         } catch (e) {
-            return "Server connection issue.";
+            return "Thinking...";
         }
     };
 
@@ -49,38 +49,45 @@ export default async function handler(req, res) {
     if (isTTSRequest || (mode === 'text' && hasAudioInput)) {
         let userText = "";
 
-        // 1. LISTEN (Deepgram - Fixed for Mobile)
+        // 1. SUNNA (Deepgram - Android Friendly)
         if (hasAudioInput && !isTTSRequest) {
             const audioPart = contents[0].parts.find(p => p.inlineData);
             const audioBuffer = Buffer.from(audioPart.inlineData.data, 'base64');
             try {
-                // 👇 FIX: Mobile browsers send 'audio/webm'. Deepgram needs to know this.
+                // 👇 BIG FIX: 'audio/webm' is what Android sends!
                 const sttResponse = await fetch("https://api.deepgram.com/v1/listen?model=nova-2&smart_format=true&language=en-IN", {
                     method: "POST",
                     headers: { 
                         "Authorization": `Token ${DEEPGRAM_KEY}`,
-                        "Content-Type": "audio/webm" // ✅ Correct format for Android
+                        "Content-Type": "audio/webm" // ✅ Ye Android ke liye zaroori hai
                     },
                     body: audioBuffer
                 });
 
-                if (!sttResponse.ok) {
-                    const err = await sttResponse.text();
-                    console.error("Deepgram Error:", err);
-                    throw new Error("Mic Error");
-                }
+                if (!sttResponse.ok) throw new Error("Mic Error");
                 const sttData = await sttResponse.json();
                 userText = sttData.results?.channels?.[0]?.alternatives?.[0]?.transcript;
                 
                 if (!userText) return res.status(200).json({ text: "...", audio: null });
             } catch (e) {
-                return res.status(200).json({ text: "Mic problem. Please speak louder.", audio: null });
+                // Agar WebM fail ho, to auto-detect try karo (Backup)
+                 try {
+                    const sttRetry = await fetch("https://api.deepgram.com/v1/listen?model=nova-2&smart_format=true&language=en-IN", {
+                        method: "POST",
+                        headers: { "Authorization": `Token ${DEEPGRAM_KEY}` }, // No content-type (Auto)
+                        body: audioBuffer
+                    });
+                    const retryData = await sttRetry.json();
+                    userText = retryData.results?.channels?.[0]?.alternatives?.[0]?.transcript;
+                 } catch(err) {
+                    return res.status(200).json({ text: "Mic problem.", audio: null });
+                 }
             }
         } else if (isTTSRequest) {
             userText = contents[0].parts[0].text;
         }
 
-        // 2. THINK (OpenAI via Pollinations)
+        // 2. SOCHNA (Pollinations AI)
         let replyText = userText;
         if (!isTTSRequest && userText) {
             let sysPrompt = "You are PadhaiSetu. Reply in Hinglish. Keep it short.";
@@ -92,7 +99,7 @@ export default async function handler(req, res) {
             ]);
         }
 
-        // 3. SPEAK (Deepgram Aura)
+        // 3. BOLNA (Deepgram Aura - The Human Voice)
         try {
             const ttsResponse = await fetch("https://api.deepgram.com/v1/speak?model=aura-asteria-en", {
                 method: "POST",
@@ -109,18 +116,12 @@ export default async function handler(req, res) {
         }
     }
 
-    // =================================================================
-    // 🧠 MODE 2: TEXT CHAT (OpenAI)
-    // =================================================================
+    // Text Mode
     if (mode === 'text') {
       let sysP = "You are a helpful AI tutor.";
       if (systemInstruction?.parts?.[0]?.text) sysP = systemInstruction.parts[0].text;
       let userM = contents[0].parts.map(p => p.text).join('\n');
-
-      const text = await thinkWithPollinations([
-          { role: "system", content: sysP },
-          { role: "user", content: userM }
-      ]);
+      const text = await thinkWithPollinations([{ role: "system", content: sysP }, { role: "user", content: userM }]);
       return res.status(200).json({ text: text });
     }
 
@@ -136,4 +137,4 @@ export default async function handler(req, res) {
   } catch (error) {
     return res.status(500).json({ error: "Server Error", text: "Error." });
   }
-         }
+                                                 }
