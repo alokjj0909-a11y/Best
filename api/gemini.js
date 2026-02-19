@@ -1,11 +1,10 @@
-// api/gemini.js - POLLINATIONS CHATGPT-4O VISION VERSION
+// api/gemini.js - POLLINATIONS POWER-VISION (Best for Swadhyay Papers)
 export const config = {
   maxDuration: 60,
-  api: { bodyParser: { sizeLimit: '10mb' } }, // Vision ke liye size badhaya hai
+  api: { bodyParser: { sizeLimit: '10mb' } },
 };
 
 export default async function handler(req, res) {
-  // CORS Headers for Vercel
   res.setHeader('Access-Control-Allow-Origin', '*');
   res.setHeader('Access-Control-Allow-Methods', 'POST, OPTIONS');
   res.setHeader('Access-Control-Allow-Headers', 'Content-Type');
@@ -15,80 +14,62 @@ export default async function handler(req, res) {
   try {
     const { mode, contents, systemInstruction } = req.body;
 
-    // 1. IMAGE GENERATION MODE (Smart Class visuals)
+    // 1. IMAGE GENERATION (Smart Class)
     if (mode === 'image') {
        const prompt = encodeURIComponent(req.body.prompt || "educational diagram");
-       const seed = Math.floor(Math.random() * 10000);
-       const imageUrl = `https://image.pollinations.ai/prompt/${prompt}?nologo=true&model=flux&width=1024&height=1024&seed=${seed}`;
+       const imageUrl = `https://image.pollinations.ai/prompt/${prompt}?nologo=true&model=flux&width=1024&height=1024&seed=${Math.floor(Math.random()*10000)}`;
        return res.status(200).json({ image: imageUrl });
     }
 
-    // 2. TEXT & VISION MODE (Chat + Swadhyay Paper Solver)
-    let userPrompt = "";
+    // 2. TEXT & VISION HANDLING
+    let userText = "";
     let base64Image = null;
 
-    // Frontend se aane wale contents se Text aur Image ko alag karna
-    if (contents && contents[0] && contents[0].parts) {
+    if (contents && contents[0]?.parts) {
         contents[0].parts.forEach(part => {
-            if (part.text) userPrompt += part.text + " ";
-            if (part.inlineData && part.inlineData.data) {
-                base64Image = part.inlineData.data; // Paper ki photo yahan milegi
-            }
+            if (part.text) userText += part.text + " ";
+            if (part.inlineData?.data) base64Image = part.inlineData.data;
         });
     }
 
-    // Persona logic: Badi Didi, Sir, etc.
     const persona = typeof systemInstruction === 'string' 
         ? systemInstruction 
-        : (systemInstruction?.parts?.[0]?.text || "You are PadhaiSetu, a helpful Indian AI tutor.");
+        : (systemInstruction?.parts?.[0]?.text || "You are PadhaiSetu, a helpful teacher.");
 
-    // Pollinations ke liye Messages Array taiyar karna
-    const messages = [
-        { role: "system", content: persona }
-    ];
+    const messages = [{ role: "system", content: persona }];
 
     if (base64Image) {
-        // 🔥 VISION LOGIC: Image ko ChatGPT-4o (openai) ke standard format mein bhejna
+        // 🔥 IMPROVED VISION PAYLOAD
         messages.push({
             role: "user",
             content: [
-                { type: "text", text: userPrompt.trim() || "Is question paper ko solve karke do." },
+                { type: "text", text: userText.trim() || "Analyze and solve this question paper completely." },
                 { type: "image_url", image_url: { url: `data:image/jpeg;base64,${base64Image}` } }
             ]
         });
     } else {
-        // Normal text chat
-        messages.push({ role: "user", content: userPrompt.trim() || "Hello" });
+        messages.push({ role: "user", content: userText.trim() || "Hello" });
     }
 
-    // Pollinations API Call (Using ChatGPT-4o / openai)
+    // 🔥 USING 'p1' MODEL: Pollinations का सबसे एडवांस विजन मॉडल
     const response = await fetch('https://text.pollinations.ai/', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({
             messages: messages,
-            model: 'openai', // Isme Vision support built-in hai
-            seed: Math.floor(Math.random() * 1000)
+            model: 'p1', // Much better at OCR and Vision tasks
+            seed: Math.floor(Math.random() * 1000),
+            private: true
         })
     });
 
-    if (!response.ok) {
-        throw new Error("Pollinations API connection failed");
-    }
+    if (!response.ok) throw new Error("Pollinations Connection Error");
+    const aiText = await response.text();
 
-    const aiResponseText = await response.text();
-
-    // Final result dena (Audio null hai taaki browser ki awaz chale)
-    return res.status(200).json({ 
-        text: aiResponseText || "Maafi chahta hoon, main ise samajh nahi paya.", 
-        audio: null 
-    });
+    return res.status(200).json({ text: aiText, audio: null });
 
   } catch (error) {
     console.error("Backend Error:", error);
-    return res.status(500).json({ 
-        error: "Server Error", 
-        text: "Piche se kuch gadbad hui hai, kripya dobara koshish karein." 
-    });
+    return res.status(500).json({ error: "Server Error", text: "Kripya dobara koshish karein." });
   }
-}
+  }
