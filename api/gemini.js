@@ -1,7 +1,7 @@
-// api/gemini.js - FIXED VISION HANDLING
+// api/gemini.js - TIMEOUT HANDLING VERSION
 
 export const config = {
-  maxDuration: 60,
+  maxDuration: 60,  // Vercel Pro में काम करेगा, Hobby में ignore होगा
   api: { bodyParser: { sizeLimit: '10mb' } },
 };
 
@@ -16,62 +16,58 @@ export default async function handler(req, res) {
   if (req.method !== 'POST') return res.status(405).json({ error: 'Method Not Allowed' });
 
   try {
-    const { mode, contents } = req.body;
+    const { mode, contents, prompt, systemInstruction } = req.body;
 
     if (mode === 'text') {
-      // Check for Groq API Key
       if (!process.env.GROQ_API_KEY) {
-        return res.status(200).json({ 
-          text: "Server configuration error: API key missing." 
-        });
+        return res.status(200).json({ text: "Server configuration error." });
       }
 
-      // Parse contents - बेहतर parsing
+      // Parse contents
       let userText = "";
       let imageUrl = null;
       
       if (contents && contents[0] && contents[0].parts) {
         for (const part of contents[0].parts) {
-          if (part.text) {
-            userText += part.text + "\n";
-          }
+          if (part.text) userText += part.text + "\n";
           if (part.inlineData) {
-            // Clean base64 data
             let base64Data = part.inlineData.data;
             const mimeType = part.inlineData.mimeType || 'image/jpeg';
             
-            // अगर पहले से data URL नहीं है तो बनाओ
             if (!base64Data.startsWith('data:')) {
               imageUrl = `data:${mimeType};base64,${base64Data}`;
             } else {
               imageUrl = base64Data;
             }
-            console.log("✅ Image detected in request");
           }
         }
       }
 
-      // Prepare messages
       let messages = [
         { 
           role: "system", 
-          content: "You are PadhaiSetu, an expert teacher. You CAN see images. Always solve the question paper completely." 
+          content: systemInstruction || "You are PadhaiSetu, an expert teacher. Respond in the same language as the user." 
         }
       ];
 
       if (imageUrl) {
-        // 📸 VISION MODE - Llama 4 Scout
-        console.log("🖼️ Using Llama 4 Scout for vision");
+        // 📸 VISION MODE - with timeout handling
+        console.log("🖼️ Trying Llama 4 Scout for vision");
         
         messages.push({
           role: "user",
           content: [
-            { type: "text", text: userText || "Solve this question paper completely. Use tables." },
+            { type: "text", text: userText || "Solve this question paper completely." },
             { type: "image_url", image_url: { url: imageUrl } }
           ]
         });
 
-        const response = await fetch(GROQ_API_URL, {
+        // Use Promise.race to handle timeout
+        const timeoutPromise = new Promise((_, reject) => 
+          setTimeout(() => reject(new Error("Vision timeout")), 9000) // 9 seconds timeout
+        );
+
+        const visionPromise = fetch(GROQ_API_URL, {
           method: 'POST',
           headers: {
             'Authorization': `Bearer ${process.env.GROQ_API_KEY}`,
@@ -83,18 +79,46 @@ export default async function handler(req, res) {
             temperature: 0.2,
             max_tokens: 4096
           })
+        }).then(async response => {
+          if (!response.ok) throw new Error(`Vision failed: ${response.status}`);
+          const data = await response.json();
+          return data.choices[0].message.content;
         });
 
-        if (!response.ok) {
-          const errorText = await response.text();
-          console.error("❌ Groq Vision Error:", errorText);
+        try {
+          // Race between vision and timeout
+          const visionResponse = await Promise.race([visionPromise, timeoutPromise]);
+          return res.status(200).json({ text: visionResponse });
+        } catch (error) {
+          // Vision timeout or failed - fallback to text-only
+          console.log("⚠️ Vision failed, falling back to text-only model");
+          
+          // Remove image and try with text only
+          messages.pop(); // remove vision message
+          messages.push({ 
+            role: "user", 
+            content: userText || "Please help with this question." 
+          });
+
+          const textResponse = await fetch(GROQ_API_URL, {
+            method: 'POST',
+            headers: {
+              'Authorization': `Bearer ${process.env.GROQ_API_KEY}`,
+              'Content-Type': 'application/json'
+            },
+            body: JSON.stringify({
+              model: 'llama-3.3-70b-versatile',
+              messages: messages,
+              temperature: 0.7,
+              max_tokens: 2048
+            })
+          });
+
+          const textData = await textResponse.json();
           return res.status(200).json({ 
-            text: "Image processing failed. Please try again with a clearer image." 
+            text: textData.choices[0]?.message?.content || "Could not process. Please try again." 
           });
         }
-
-        const data = await response.json();
-        return res.status(200).json({ text: data.choices[0].message.content });
 
       } else {
         // 💬 TEXT ONLY MODE
@@ -119,12 +143,23 @@ export default async function handler(req, res) {
       }
     }
 
-    // ... (image generation and TTS modes remain same)
+    // Image generation and TTS modes (same as before)
+    if (mode === 'image') {
+      const imagePrompt = encodeURIComponent(prompt || "educational diagram");
+      const imageUrl = `https://image.pollinations.ai/prompt/${imagePrompt}?nologo=true&model=flux&width=1024&height=1024&seed=${Math.floor(Math.random()*1000)}`;
+      return res.status(200).json({ image: imageUrl });
+    }
+
+    if (mode === 'tts') {
+      return res.status(200).json({ audio: null });
+    }
+
+    return res.status(400).json({ error: 'Invalid mode' });
 
   } catch (error) {
     console.error("🔥 Server Error:", error);
-    return res.status(500).json({ 
-      text: "Server error. Please try again." 
+    return res.status(200).json({ 
+      text: "Server busy. Please try again with a clearer image or text only." 
     });
   }
-}
+        }
