@@ -1,10 +1,14 @@
-// api/gemini.js
+// api/gemini.js - POLLINATIONS ONLY VERSION
+// No Deepgram, No External TTS. 
+// Uses Pollinations for ChatGPT Brain and Flux Image.
+
 export const config = {
   maxDuration: 60,
   api: { bodyParser: { sizeLimit: '4mb' } },
 };
 
 export default async function handler(req, res) {
+  // CORS Headers
   res.setHeader('Access-Control-Allow-Origin', '*');
   res.setHeader('Access-Control-Allow-Methods', 'POST, OPTIONS');
   res.setHeader('Access-Control-Allow-Headers', 'Content-Type');
@@ -13,83 +17,76 @@ export default async function handler(req, res) {
   if (req.method !== 'POST') return res.status(405).json({ error: 'Method Not Allowed' });
 
   try {
-    const { mode, contents, systemInstruction, prompt } = req.body;
+    const { mode, contents, systemInstruction } = req.body;
 
-    // ---------- IMAGE GENERATION (Pollinations Flux) ----------
-    if (mode === 'image') {
-      const imageUrl = `https://image.pollinations.ai/prompt/${encodeURIComponent(prompt)}?nologo=true&model=flux&width=1024&height=1024&seed=${Math.floor(Math.random()*1000)}`;
-      return res.status(200).json({ image: imageUrl });
-    }
+    // 🔥 1. BRAIN: Pollinations ChatGPT Helper
+    const thinkWithPollinations = async (messages) => {
+        try {
+            const response = await fetch('https://text.pollinations.ai/', {
+                method: 'POST',
+                headers: { 'Content-Type': 'application/json' },
+                body: JSON.stringify({
+                    messages: messages,
+                    model: 'openai', // Using ChatGPT model
+                    seed: Math.floor(Math.random() * 1000)
+                })
+            });
+            if (!response.ok) throw new Error("Pollinations Brain Error");
+            const text = await response.text();
+            return text || "Maafi chahta hoon, main samajh nahi paya.";
+        } catch (e) {
+            return "Connection weak. Please try again.";
+        }
+    };
 
-    // ---------- TTS (frontend uses browser TTS) ----------
-    if (mode === 'tts') {
-      return res.status(200).json({ text: null, audio: null });
-    }
+    // =================================================================
+    // 🎤 MODE: TEXT & TTS REQUESTS
+    // =================================================================
+    if (mode === 'text' || mode === 'tts') {
+        let userText = "";
 
-    // ---------- TEXT (Chat / Swadhyay) ----------
-    if (mode === 'text') {
-      const hasImage = contents[0]?.parts?.some(part => part.inlineData);
-      const geminiKey = process.env.GEMINI_API_KEY;
-
-      // Agar image hai aur Gemini key available hai → Gemini Vision
-      if (hasImage && geminiKey) {
-        const geminiUrl = `https://generativelanguage.googleapis.com/v1beta/models/gemini-1.5-flash:generateContent?key=${geminiKey}`;
-
-        const geminiContents = [{
-          parts: contents[0].parts.map(part => {
-            if (part.text) return { text: part.text };
-            if (part.inlineData) return {
-              inlineData: {
-                mimeType: part.inlineData.mimeType,
-                data: part.inlineData.data
-              }
-            };
-          })
-        }];
-
-        const requestBody = { contents: geminiContents };
-        if (systemInstruction?.parts?.[0]?.text) {
-          requestBody.systemInstruction = { parts: [{ text: systemInstruction.parts[0].text }] };
+        // Text input extraction
+        if (mode === 'tts') {
+            userText = contents[0].parts[0].text;
+        } else {
+            // Normal chat or Image analysis (handled as text prompt)
+            userText = contents[0].parts.map(p => p.text || "[Attachment]").join('\n');
         }
 
-        const response = await fetch(geminiUrl, {
-          method: 'POST',
-          headers: { 'Content-Type': 'application/json' },
-          body: JSON.stringify(requestBody)
+        // Processing with AI
+        let replyText = userText;
+        if (mode !== 'tts') {
+            let sysPrompt = "You are PadhaiSetu, a helpful human-like AI tutor. Reply in the same language as the user.";
+            if (systemInstruction?.parts?.[0]?.text) sysPrompt = systemInstruction.parts[0].text;
+
+            replyText = await thinkWithPollinations([
+                { role: "system", content: sysPrompt },
+                { role: "user", content: userText }
+            ]);
+        }
+
+        // ✅ OUTPUT: Audio set to null so Frontend Browser Voice takes over.
+        // Frontend (HTML) will use its fallbackTTS (Girl voice logic).
+        return res.status(200).json({ 
+            text: replyText, 
+            audio: null 
         });
+    }
 
-        const data = await response.json();
-        if (!response.ok) throw new Error(data.error?.message || 'Gemini error');
-        const replyText = data.candidates[0].content.parts[0].text;
-        return res.status(200).json({ text: replyText });
-      }
-
-      // Nahi to Pollinations text‑only
-      const userText = contents[0].parts.map(p => p.text || '').join('\n');
-      const sysPrompt = systemInstruction?.parts?.[0]?.text ||
-        "You are PadhaiSetu, a helpful human-like AI tutor. Reply in the same language as the user.";
-
-      const pollinationsResponse = await fetch('https://text.pollinations.ai/', {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({
-          messages: [
-            { role: "system", content: sysPrompt },
-            { role: "user", content: userText }
-          ],
-          model: 'openai',
-          seed: Math.floor(Math.random() * 1000)
-        })
-      });
-
-      if (!pollinationsResponse.ok) throw new Error("Pollinations error");
-      const replyText = await pollinationsResponse.text();
-      return res.status(200).json({ text: replyText });
+    // =================================================================
+    // 🎨 MODE: IMAGE GENERATION (Pollinations Flux)
+    // =================================================================
+    if (mode === 'image') {
+       const prompt = encodeURIComponent(req.body.prompt || "education");
+       // Creating direct HD Flux image URL
+       const imageUrl = `https://image.pollinations.ai/prompt/${prompt}?nologo=true&model=flux&width=1024&height=1024&seed=${Math.floor(Math.random()*1000)}`;
+       return res.status(200).json({ image: imageUrl });
     }
 
     return res.status(400).json({ error: 'Invalid mode' });
+
   } catch (error) {
     console.error("Server Error:", error);
     return res.status(500).json({ error: "Server Error", text: "Kuch gadbad ho gayi hai." });
   }
-}
+         }
