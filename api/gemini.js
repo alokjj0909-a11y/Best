@@ -1,9 +1,14 @@
-// api/gemini.js - POLLINATIONS VISION + FLUX IMAGE
+// api/gemini.js - GROQ VISION + FLUX IMAGE
+// Swadhyay Solver के लिए Llama 4 Scout (Vision)
+// Chat के लिए Llama 3.3 70B
+// Images के लिए Pollinations Flux
 
 export const config = {
   maxDuration: 60,
   api: { bodyParser: { sizeLimit: '10mb' } }, // बड़ी images के लिए
 };
+
+const GROQ_API_URL = 'https://api.groq.com/openai/v1/chat/completions';
 
 export default async function handler(req, res) {
   // CORS Headers
@@ -17,106 +22,178 @@ export default async function handler(req, res) {
   try {
     const { mode, contents, prompt, systemInstruction } = req.body;
 
-    // 🔥 1. BRAIN: Pollinations ChatGPT Helper (Text + Vision)
-    const thinkWithPollinations = async (messages) => {
-        try {
-            // Vision के लिए special handling
-            const response = await fetch('https://text.pollinations.ai/', {
-                method: 'POST',
-                headers: { 'Content-Type': 'application/json' },
-                body: JSON.stringify({
-                    messages: messages,
-                    model: 'openai', // GPT-4o mini (vision capable)
-                    seed: Math.floor(Math.random() * 1000)
-                })
-            });
-            if (!response.ok) throw new Error("Pollinations Brain Error");
-            const text = await response.text();
-            return text || "Maafi chahta hoon, main samajh nahi paya.";
-        } catch (e) {
-            return "Connection weak. Please try again.";
-        }
-    };
-
     // =================================================================
-    // 🎤 MODE: TEXT (with optional image)
+    // 🎤 MODE: TEXT (Chat, Swadhyay Solver, Smart Class Script)
     // =================================================================
     if (mode === 'text') {
-        // Check if image is present in contents
-        let userText = "";
-        let hasImage = false;
-        let imageData = null;
+      // Check for Groq API Key
+      if (!process.env.GROQ_API_KEY) {
+        console.error('❌ GROQ_API_KEY missing');
+        return res.status(200).json({ 
+          text: "Server configuration error: API key missing." 
+        });
+      }
 
-        // Parse contents to check for image
-        if (contents && contents[0] && contents[0].parts) {
-            for (const part of contents[0].parts) {
-                if (part.text) {
-                    userText += part.text + "\n";
-                }
-                if (part.inlineData) {
-                    hasImage = true;
-                    imageData = part.inlineData.data; // base64 image
-                }
+      // Parse contents to extract text and image
+      let userText = "";
+      let imageUrl = null;
+      let mimeType = "image/jpeg";
+
+      if (contents && contents[0] && contents[0].parts) {
+        for (const part of contents[0].parts) {
+          if (part.text) {
+            userText += part.text + "\n";
+          }
+          if (part.inlineData) {
+            // Store mime type if available
+            if (part.inlineData.mimeType) {
+              mimeType = part.inlineData.mimeType;
             }
+            // Convert base64 to data URL
+            imageUrl = `data:${mimeType};base64,${part.inlineData.data}`;
+            console.log("✅ Image detected in request");
+          }
+        }
+      }
+
+      // Prepare system prompt
+      const sysContent = systemInstruction?.parts?.[0]?.text || 
+                         systemInstruction || 
+                         "You are PadhaiSetu, an expert teacher for Indian students. Respond in the same language as the user (Hindi, English, Gujarati, etc.).";
+
+      let messages = [{ role: "system", content: sysContent }];
+
+      // Prepare user message based on whether image exists
+      if (imageUrl) {
+        // 📸 VISION MODE - Llama 4 Scout (for Swadhyay Solver)
+        console.log("🖼️ Using Llama 4 Scout for vision");
+        
+        messages.push({
+          role: "user",
+          content: [
+            { 
+              type: "text", 
+              text: userText || "Solve this question paper completely. Use tables where needed. Format answers properly." 
+            },
+            { 
+              type: "image_url", 
+              image_url: { url: imageUrl } 
+            }
+          ]
+        });
+
+        const response = await fetch(GROQ_API_URL, {
+          method: 'POST',
+          headers: {
+            'Authorization': `Bearer ${process.env.GROQ_API_KEY}`,
+            'Content-Type': 'application/json'
+          },
+          body: JSON.stringify({
+            model: 'llama-4-scout-17b-16e-instruct', // Vision model for Swadhyay
+            messages: messages,
+            temperature: 0.2, // Low temperature for accurate answers
+            max_tokens: 4096
+          })
+        });
+
+        if (!response.ok) {
+          const errorText = await response.text();
+          console.error("❌ Groq Vision Error:", response.status, errorText);
+          
+          // Try fallback to text-only model
+          console.log("⚠️ Falling back to text-only model");
+          messages = messages.filter(m => m.role !== 'user');
+          messages.push({ 
+            role: "user", 
+            content: userText || "Please help with this question." 
+          });
+
+          const fallbackResponse = await fetch(GROQ_API_URL, {
+            method: 'POST',
+            headers: {
+              'Authorization': `Bearer ${process.env.GROQ_API_KEY}`,
+              'Content-Type': 'application/json'
+            },
+            body: JSON.stringify({
+              model: 'llama-3.3-70b-versatile',
+              messages: messages,
+              temperature: 0.7,
+              max_tokens: 2048
+            })
+          });
+
+          const fallbackData = await fallbackResponse.json();
+          return res.status(200).json({ 
+            text: fallbackData.choices[0]?.message?.content || "Maafi chahta hoon, samajh nahi paya." 
+          });
         }
 
-        // Prepare messages for Pollinations
-        let messages = [];
+        const data = await response.json();
+        return res.status(200).json({ text: data.choices[0].message.content });
 
-        // System prompt
-        if (systemInstruction) {
-            messages.push({ 
-                role: "system", 
-                content: typeof systemInstruction === 'string' 
-                    ? systemInstruction 
-                    : systemInstruction.parts?.[0]?.text || "You are PadhaiSetu, a helpful AI tutor."
-            });
-        } else {
-            messages.push({ role: "system", content: "You are PadhaiSetu, a helpful AI tutor." });
+      } else {
+        // 💬 TEXT ONLY MODE - Llama 3.3 70B (fast)
+        console.log("💬 Using Llama 3.3 70B for text");
+        
+        messages.push({ 
+          role: "user", 
+          content: userText || "Hello" 
+        });
+
+        const response = await fetch(GROQ_API_URL, {
+          method: 'POST',
+          headers: {
+            'Authorization': `Bearer ${process.env.GROQ_API_KEY}`,
+            'Content-Type': 'application/json'
+          },
+          body: JSON.stringify({
+            model: 'llama-3.3-70b-versatile',
+            messages: messages,
+            temperature: 0.7,
+            max_tokens: 2048
+          })
+        });
+
+        if (!response.ok) {
+          const errorText = await response.text();
+          console.error("❌ Groq Text Error:", response.status, errorText);
+          return res.status(200).json({ 
+            text: "Service temporarily unavailable. Please try again." 
+          });
         }
 
-        // User message with or without image
-        if (hasImage && imageData) {
-            // Vision mode - send image as base64
-            messages.push({
-                role: "user",
-                content: [
-                    { type: "text", text: userText || "What is in this image?" },
-                    { type: "image_url", image_url: { url: `data:image/jpeg;base64,${imageData}` } }
-                ]
-            });
-        } else {
-            // Text only mode
-            messages.push({ role: "user", content: userText || "Hello" });
-        }
-
-        // Get response from Pollinations
-        const replyText = await thinkWithPollinations(messages);
-
-        return res.status(200).json({ text: replyText });
+        const data = await response.json();
+        return res.status(200).json({ text: data.choices[0].message.content });
+      }
     }
 
     // =================================================================
-    // 🎨 MODE: IMAGE GENERATION (Pollinations Flux)
+    // 🎨 MODE: IMAGE GENERATION (Smart Class Diagrams)
     // =================================================================
     if (mode === 'image') {
-       const prompt = encodeURIComponent(req.body.prompt || "education");
-       const imageUrl = `https://image.pollinations.ai/prompt/${prompt}?nologo=true&model=flux&width=1024&height=1024&seed=${Math.floor(Math.random()*1000)}`;
-       return res.status(200).json({ image: imageUrl });
+      const imagePrompt = encodeURIComponent(prompt || "educational diagram");
+      // Pollinations Flux for image generation
+      const imageUrl = `https://image.pollinations.ai/prompt/${imagePrompt}?nologo=true&model=flux&width=1024&height=1024&seed=${Math.floor(Math.random()*1000)}`;
+      
+      console.log("🖼️ Generating image with Flux");
+      return res.status(200).json({ image: imageUrl });
     }
 
     // =================================================================
-    // 🎵 MODE: TTS (Browser fallback)
+    // 🎵 MODE: TTS (Browser Fallback)
     // =================================================================
     if (mode === 'tts') {
-        // Browser TTS will handle this
-        return res.status(200).json({ audio: null });
+      // Browser TTS will handle this
+      return res.status(200).json({ audio: null });
     }
 
     return res.status(400).json({ error: 'Invalid mode' });
 
   } catch (error) {
-    console.error("Server Error:", error);
-    return res.status(500).json({ error: "Server Error", text: "Kuch gadbad ho gayi hai." });
+    console.error("🔥 Server Error:", error);
+    return res.status(500).json({ 
+      error: "Server Error", 
+      text: "Kuch gadbad ho gayi hai. Please try again." 
+    });
   }
-}
+            }
