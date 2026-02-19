@@ -14,10 +14,12 @@ export default async function handler(req, res) {
 
   try {
     const { mode, contents, systemInstruction } = req.body;
-    const model = "gemini-1.5-flash"; 
     
-    // 🔥 Sabse pehle v1 (Stable) try karte hain
-    let url = `https://generativelanguage.googleapis.com/v1/models/${model}:generateContent?key=${GOOGLE_API_KEY}`;
+    // 🔥 सुधार 1: gemini-1.5-flash-latest का उपयोग
+    const modelName = "gemini-1.5-flash-latest"; 
+    
+    // 🔥 सुधार 2: v1 (Stable) एंडपॉइंट का उपयोग
+    let url = `https://generativelanguage.googleapis.com/v1/models/${modelName}:generateContent?key=${GOOGLE_API_KEY}`;
     
     let payload = {
       contents: contents,
@@ -33,10 +35,10 @@ export default async function handler(req, res) {
 
     let data = await response.json();
 
-    // 🔄 FALLBACK: Agar v1 fail hota hai to v1beta try karein
+    // 🔄 FALLBACK: यदि v1 काम नहीं करता, तो v1beta पर प्रयास करें
     if (!response.ok) {
-      console.warn("v1 failed, trying v1beta...");
-      url = `https://generativelanguage.googleapis.com/v1beta/models/${model}:generateContent?key=${GOOGLE_API_KEY}`;
+      console.warn("v1 failed or model not found, trying fallback...");
+      url = `https://generativelanguage.googleapis.com/v1beta/models/${modelName}:generateContent?key=${GOOGLE_API_KEY}`;
       response = await fetch(url, {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
@@ -46,12 +48,15 @@ export default async function handler(req, res) {
     }
 
     if (!response.ok) {
-      return res.status(response.status).json({ error: data.error?.message || "Google API Error" });
+      // यदि दोनों एंडपॉइंट फेल होते हैं, तो एरर दिखाएं
+      return res.status(response.status).json({ 
+        error: data.error?.message || "Model access error. Please check your API key permissions." 
+      });
     }
 
     const aiText = data.candidates?.[0]?.content?.parts?.[0]?.text || "Maafi chahta hoon, main samajh nahi paya.";
 
-    // Image logic (Pollinations)
+    // Image logic (Pollinations) - No change needed here
     if (mode === 'image') {
        const prompt = encodeURIComponent(req.body.prompt || "educational diagram");
        const imageUrl = `https://image.pollinations.ai/prompt/${prompt}?nologo=true&model=flux&width=1024&height=1024&seed=${Math.floor(Math.random()*1000)}`;
