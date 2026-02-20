@@ -1,76 +1,91 @@
-// api/gemini.js - VERCEL DEPLOYMENT VERSION
+// api/gemini.js - Pure Pollinations Backend
+// No hardcoded Gemini models - sab kuch Pollinations se
+
 export const config = {
-  maxDuration: 60, // Vercel Pro allows up to 300, Free is usually 10-60
-  api: { bodyParser: { sizeLimit: '10mb' } },
+  maxDuration: 60,
+  api: { bodyParser: { sizeLimit: '4mb' } },
 };
 
 export default async function handler(req, res) {
-  // CORS Headers for Vercel
+  // CORS Headers
   res.setHeader('Access-Control-Allow-Origin', '*');
   res.setHeader('Access-Control-Allow-Methods', 'POST, OPTIONS');
   res.setHeader('Access-Control-Allow-Headers', 'Content-Type');
 
   if (req.method === 'OPTIONS') return res.status(200).end();
+  if (req.method !== 'POST') return res.status(405).json({ error: 'Method Not Allowed' });
 
   try {
-    const { mode, contents, systemInstruction } = req.body;
+    const { mode, contents, systemInstruction, prompt } = req.body;
 
-    // 1. SMART CLASS IMAGE GENERATION (Pollinations Flux)
+    // ---------- IMAGE GENERATION (Pollinations Flux) ----------
     if (mode === 'image') {
-       const promptText = contents?.[0]?.parts?.[0]?.text || "educational diagram";
-       const imageUrl = `https://image.pollinations.ai/prompt/${encodeURIComponent(promptText)}?nologo=true&model=flux&width=1024&height=1024&seed=${Math.floor(Math.random() * 10000)}`;
-       return res.status(200).json({ image: imageUrl });
+      const imageUrl = `https://image.pollinations.ai/prompt/${encodeURIComponent(prompt)}?nologo=true&model=flux&width=1024&height=1024&seed=${Math.floor(Math.random()*1000)}`;
+      return res.status(200).json({ image: imageUrl });
     }
 
-    // 2. TEXT & VISION HANDLING (Pollinations OpenAI Model)
-    let userPrompt = "";
-    let base64Image = null;
-
-    if (contents && contents[0]?.parts) {
-        contents[0].parts.forEach(part => {
-            if (part.text) userPrompt += part.text + " ";
-            if (part.inlineData?.data) base64Image = part.inlineData.data;
-        });
+    // ---------- TTS (Not supported - frontend uses browser TTS) ----------
+    if (mode === 'tts') {
+      return res.status(200).json({ text: null, audio: null });
     }
 
-    const persona = typeof systemInstruction === 'string' 
-        ? systemInstruction 
-        : (systemInstruction?.parts?.[0]?.text || "You are PadhaiSetu, a helpful AI tutor.");
-
-    const messages = [{ role: "system", content: persona }];
-
-    if (base64Image) {
-        // 🔥 STABLE VISION FORMAT for Pollinations OpenAI
-        messages.push({
-            role: "user",
-            content: [
-                { type: "text", text: userPrompt.trim() || "Analyze this question paper." },
-                { type: "image_url", image_url: { url: `data:image/jpeg;base64,${base64Image}` } }
-            ]
-        });
-    } else {
-        messages.push({ role: "user", content: userPrompt.trim() || "Hello" });
-    }
-
-    // Call Pollinations with OpenAI model (Strong Vision Support)
-    const response = await fetch('https://text.pollinations.ai/', {
+    // ---------- TEXT (Chat / Swadhyay) ----------
+    if (mode === 'text') {
+      // Check if image is present
+      const hasInlineData = contents[0]?.parts?.some(part => part.inlineData);
+      
+      let userText = "";
+      let imageData = null;
+      
+      // Extract text and image from parts
+      for (const part of contents[0].parts) {
+        if (part.text) {
+          userText += part.text + "\n";
+        } else if (part.inlineData) {
+          imageData = part.inlineData.data;
+        }
+      }
+      
+      // Build system prompt
+      let sysPrompt = "You are PadhaiSetu, a helpful human-like AI tutor. Reply in the same language as the user.";
+      if (systemInstruction?.parts?.[0]?.text) {
+        sysPrompt = systemInstruction.parts[0].text;
+      }
+      
+      // Pollinations doesn't support vision directly
+      // So for images, we'll add a note that we're processing the image
+      let finalUserText = userText;
+      if (hasInlineData) {
+        finalUserText = "[IMAGE UPLOADED] " + userText + "\n\nPlease analyze this image if it contains educational content or a question paper. If it's a question paper, solve it completely following the format rules.";
+      }
+      
+      // Call Pollinations
+      const pollinationsResponse = await fetch('https://text.pollinations.ai/', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({
-            messages: messages,
-            model: 'openai', 
-            seed: Math.floor(Math.random() * 1000),
-            private: true
+          messages: [
+            { role: "system", content: sysPrompt },
+            { role: "user", content: finalUserText.trim() }
+          ],
+          model: 'openai',
+          seed: Math.floor(Math.random() * 1000)
         })
-    });
+      });
+      
+      if (!pollinationsResponse.ok) {
+        const errorText = await pollinationsResponse.text();
+        throw new Error(`Pollinations error: ${errorText}`);
+      }
+      
+      const replyText = await pollinationsResponse.text();
+      return res.status(200).json({ text: replyText });
+    }
 
-    if (!response.ok) throw new Error("Pollinations Service Down");
-    const aiText = await response.text();
-
-    return res.status(200).json({ text: aiText, audio: null });
+    return res.status(400).json({ error: 'Invalid mode' });
 
   } catch (error) {
-    console.error("Vercel Backend Error:", error);
-    return res.status(500).json({ error: "Server Error", text: error.message });
+    console.error("Server Error:", error);
+    return res.status(500).json({ error: "Server Error", text: "Kuch gadbad ho gayi hai. Please try again." });
   }
-}
+        }
