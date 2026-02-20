@@ -1,5 +1,5 @@
 // api/gemini.js - Pure Pollinations Backend
-// No hardcoded Gemini models - sab kuch Pollinations se
+// No hardcoded Gemini models - only Pollinations
 
 export const config = {
   maxDuration: 60,
@@ -20,6 +20,7 @@ export default async function handler(req, res) {
 
     // ---------- IMAGE GENERATION (Pollinations Flux) ----------
     if (mode === 'image') {
+      // Frontend already uses direct URL, but if called, return URL
       const imageUrl = `https://image.pollinations.ai/prompt/${encodeURIComponent(prompt)}?nologo=true&model=flux&width=1024&height=1024&seed=${Math.floor(Math.random()*1000)}`;
       return res.status(200).json({ image: imageUrl });
     }
@@ -52,8 +53,7 @@ export default async function handler(req, res) {
         sysPrompt = systemInstruction.parts[0].text;
       }
       
-      // Pollinations doesn't support vision directly
-      // So for images, we'll add a note that we're processing the image
+      // For images, add note that we're processing
       let finalUserText = userText;
       if (hasInlineData) {
         finalUserText = "[IMAGE UPLOADED] " + userText + "\n\nPlease analyze this image if it contains educational content or a question paper. If it's a question paper, solve it completely following the format rules.";
@@ -88,4 +88,4 @@ export default async function handler(req, res) {
     console.error("Server Error:", error);
     return res.status(500).json({ error: "Server Error", text: "Kuch gadbad ho gayi hai. Please try again." });
   }
-        }
+      }
