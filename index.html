@@ -1,0 +1,1642 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>PadhaiSetu AI</title>
+    
+    <!-- Tailwind CSS -->
+    <script src="https://cdn.tailwindcss.com"></script>
+    
+    <!-- Babel for in-browser JSX compilation -->
+    <script src="https://unpkg.com/@babel/standalone/babel.min.js"></script>
+
+    <!-- Custom Styles -->
+    <style>
+        .scrollbar-hide::-webkit-scrollbar { display: none; }
+        .scrollbar-hide { -ms-overflow-style: none; scrollbar-width: none; }
+        @keyframes float { 0%, 100% { transform: translateY(0); } 50% { transform: translateY(-10px); } }
+        .animate-float { animation: float 3s ease-in-out infinite; }
+        @keyframes pulse-ring {
+            0% { transform: scale(0.8); opacity: 0.5; }
+            100% { transform: scale(1.2); opacity: 0; }
+        }
+        .animate-pulse-ring {
+            animation: pulse-ring 2s cubic-bezier(0.4, 0, 0.6, 1) infinite;
+        }
+    </style>
+
+    <!-- ES Module Imports -->
+    <script type="importmap">
+    {
+        "imports": {
+            "react": "https://esm.sh/react@18.2.0",
+            "react-dom/client": "https://esm.sh/react-dom@18.2.0/client",
+            "lucide-react": "https://esm.sh/lucide-react@0.292.0?deps=react@18.2.0",
+            "firebase/app": "https://www.gstatic.com/firebasejs/10.8.1/firebase-app.js",
+            "firebase/auth": "https://www.gstatic.com/firebasejs/10.8.1/firebase-auth.js",
+            "firebase/firestore": "https://www.gstatic.com/firebasejs/10.8.1/firebase-firestore.js"
+        }
+    }
+    </script>
+</head>
+<body class="bg-white">
+    <div id="root"></div>
+
+    <!-- FALLBACK DIV -->
+    <div id="fallback" style="display: none; text-align: center; padding: 50px; font-family: sans-serif;">
+        <h2 style="color: #333;">Loading PadhaiSetu...</h2>
+        <p style="color: #666;">If this persists, check console (F12)</p>
+    </div>
+
+    <script>
+        // Show fallback after 5 seconds if React fails
+        setTimeout(() => {
+            if (!document.getElementById('root').innerHTML) {
+                document.getElementById('fallback').style.display = 'block';
+            }
+        }, 5000);
+    </script>
+
+    <!-- MAIN APP SCRIPT -->
+    <script type="text/babel" data-type="module">
+        import React, { useState, useEffect, useRef } from 'react';
+        import { createRoot } from 'react-dom/client';
+        import { initializeApp } from 'firebase/app';
+        import { 
+          getAuth, 
+          signInWithPopup, 
+          GoogleAuthProvider, 
+          onAuthStateChanged, 
+          signOut,
+          signInAnonymously
+        } from 'firebase/auth';
+        import { 
+          getFirestore, 
+          doc, 
+          setDoc, 
+          getDoc, 
+          serverTimestamp,
+          updateDoc,
+          increment,
+          collection,
+          query,
+          orderBy,
+          onSnapshot,
+          deleteDoc,
+          addDoc
+        } from 'firebase/firestore';
+        import { 
+          MessageSquare, Mic, Image as ImageIcon, Send, Menu, X, LogOut, Crown, FileText, Play, BookOpen, Upload, CheckCircle, Sparkles, Headphones, Volume2, StopCircle, Loader2, Globe, IndianRupee, TrendingUp, Award, FileType, Download, Printer, Shield, GraduationCap, VolumeX, Activity, User, Heart, Smile, ChevronDown, Zap, Music, Plus, Trash2, MessageCircle, AlertCircle, ScanLine, FileCheck, ArrowLeft, Camera, Paperclip, ArrowDown, Maximize2, FileQuestion, Film, Languages, Box, Brain, MonitorPlay, Aperture, Pause, RotateCcw, Clapperboard, School, Lightbulb, Cpu, Copy, Check, Table as TableIcon, History
+        } from 'lucide-react';
+
+        // --- ERROR BOUNDARY ---
+        class ErrorBoundary extends React.Component {
+            constructor(props) {
+                super(props);
+                this.state = { hasError: false, error: null, errorInfo: null };
+            }
+            static getDerivedStateFromError(error) {
+                return { hasError: true, error };
+            }
+            componentDidCatch(error, errorInfo) {
+                console.error("App Crashed:", error, errorInfo);
+                this.setState({ errorInfo });
+            }
+            render() {
+                if (this.state.hasError) {
+                    return (
+                        <div className="min-h-screen bg-red-50 p-10 text-center flex flex-col items-center justify-center">
+                            <h1 className="text-3xl font-bold text-red-700 mb-2">Oops! PadhaiSetu mein kuch gadbad hai.</h1>
+                            <p className="text-gray-600 mb-6">Error: {this.state.error?.toString()}</p>
+                            <pre className="bg-white p-4 rounded-lg shadow border border-red-200 text-sm text-left overflow-auto w-full max-w-2xl text-red-500">
+                                {this.state.errorInfo?.componentStack || "No stack trace"}
+                            </pre>
+                            <button onClick={() => window.location.reload()} className="mt-4 px-4 py-2 bg-red-600 text-white rounded">Reload</button>
+                        </div>
+                    );
+                }
+                return this.props.children;
+            }
+        }
+
+        // --- CONFIGURATION ---
+        const FIREBASE_CONFIG = {
+          apiKey: "AIzaSyCxj9wQwwhkgWlJhKUjOsxLQIRvil-C5ns",
+          authDomain: "padhaisetu-ced2a.firebaseapp.com",
+          databaseURL: "https://padhaisetu-ced2a-default-rtdb.firebaseio.com",
+          projectId: "padhaisetu-ced2a",
+          storageBucket: "padhaisetu-ced2a.firebasestorage.app",
+          messagingSenderId: "635163904849",
+          appId: "1:635163904849:web:6b9715b832cb34330a6170"
+        };
+        
+        // Backend URL
+        const BACKEND_URL = "/api/gemini";
+
+        const appId = 'padhaisetu-ced2a';
+        
+        // Initialize Firebase with error handling
+        let app, auth, db, googleProvider;
+        try {
+            app = initializeApp(FIREBASE_CONFIG);
+            auth = getAuth(app);
+            db = getFirestore(app);
+            googleProvider = new GoogleAuthProvider();
+            console.log("🔥 Firebase initialized");
+        } catch (e) {
+            console.error("Firebase init error:", e);
+        }
+
+        const CLASSES = Array.from({ length: 12 }, (_, i) => `Class ${i + 1}`);
+        const STATES = ["Gujarat", "Maharashtra", "Rajasthan", "Uttar Pradesh", "Bihar", "Madhya Pradesh", "Karnataka", "Tamil Nadu", "Delhi", "Punjab"];
+        const BOARDS = ["CBSE", "ICSE", "GSEB", "MSBSHSE", "UPMSP", "RBSE"];
+        
+        const AI_VOICES = [
+          { name: "Badi Didi (Caring)", id: "Aoede", icon: Heart, gender: "female", pitch: 1.0 }, 
+          { name: "Bada Bhai (Cool)", id: "Fenrir", icon: User, gender: "male", pitch: 0.9 },   
+          { name: "Dost (Fun)", id: "Iapetus", icon: Smile, gender: "male", pitch: 1.0 },          
+          { name: "Sir (Serious)", id: "Orus", icon: BookOpen, gender: "male", pitch: 0.8 }   
+        ];
+
+        // --- UTILS ---
+        
+        // Safe AI Response Parser
+        function parseAIResponse(res) {
+          if (!res) return "⚠️ Server did not respond.";
+          if (res.ok === false) {
+            return typeof res.text === "string" ? res.text : "⚠️ AI temporary unavailable. Please retry.";
+          }
+          if (typeof res.text === "string" && res.text.trim()) {
+            return res.text.trim();
+          }
+          return "⚠️ AI returned no usable response. Please retry.";
+        }
+
+        // Backend Caller - Pure Pollinations
+        async function callBackendAI(payload) {
+            const { mode } = payload;
+            const url = BACKEND_URL;
+
+            try {
+                console.log(`📤 Calling backend (${mode})...`);
+                const response = await fetch(url, {
+                    method: 'POST',
+                    headers: { 'Content-Type': 'application/json' },
+                    body: JSON.stringify(payload)
+                });
+                
+                if (!response.ok) {
+                    const errorText = await response.text();
+                    console.error("Backend HTTP error:", response.status, errorText);
+                    return { ok: false, text: `Server error (${response.status})` };
+                }
+                
+                const data = await response.json();
+                console.log(`📥 Backend response (${mode}):`, data);
+
+                if (data.error) {
+                    console.error("Backend Error:", data.error);
+                    return { ok: false, text: data.error };
+                }
+
+                if (mode === 'image' && data.image) {
+                    return { ok: true, image: data.image };
+                } 
+                
+                if (mode === 'tts') {
+                    // TTS not supported - use browser TTS
+                    return { ok: false, text: "TTS not supported" };
+                }
+
+                if (data.text) {
+                    return { ok: true, text: data.text };
+                }
+
+                return { ok: false, text: "No content received" };
+
+            } catch (error) {
+                console.error("Network Error:", error);
+                return { ok: false, text: "Internet issue. Please check connection." };
+            }
+        }
+
+        function cleanTextForTTS(text) {
+            if (!text) return "";
+            return text.replace(/[*#`|]/g, '').replace(/\[.*?\]/g, '').replace(/\n/g, '. ').trim();
+        }
+        
+        function detectLanguage(text) {
+            if (/[\u0A80-\u0AFF]/.test(text)) return 'gu-IN';
+            if (/[\u0900-\u097F]/.test(text)) return 'hi-IN';
+            return 'en-IN';
+        }
+        
+        function blobToBase64(blob) {
+          return new Promise((resolve, reject) => {
+            const reader = new FileReader();
+            reader.onloadend = () => resolve(reader.result.split(',')[1]);
+            reader.onerror = reject;
+            reader.readAsDataURL(blob);
+          });
+        }
+        
+        function compressImageForStorage(base64Str, maxWidth = 800, quality = 0.6) {
+            return new Promise((resolve) => {
+                const img = new Image();
+                img.src = base64Str.startsWith('data:') ? base64Str : `data:image/jpeg;base64,${base64Str}`;
+                img.onload = () => {
+                    const canvas = document.createElement('canvas');
+                    const ctx = canvas.getContext('2d');
+                    let width = img.width;
+                    let height = img.height;
+                    if (width > maxWidth) {
+                        height *= maxWidth / width;
+                        width = maxWidth;
+                    }
+                    canvas.width = width;
+                    canvas.height = height;
+                    ctx.drawImage(img, 0, 0, width, height);
+                    const compressedBase64 = canvas.toDataURL('image/jpeg', quality);
+                    if (compressedBase64.length > 900000) {
+                        resolve(compressImageForStorage(base64Str, maxWidth * 0.8, quality - 0.1));
+                    } else {
+                        resolve(compressedBase64);
+                    }
+                };
+                img.onerror = () => resolve(null); 
+            });
+        }
+        
+        function getExampleTopic(userClass) {
+            if (!userClass) return "e.g. Solar System, Human Heart...";
+            const num = parseInt(userClass.replace('Class ', ''));
+            if (num <= 5) return "e.g. Apple, Elephant, Sun, Moon...";
+            if (num <= 8) return "e.g. Atom, Volcano, Water Cycle...";
+            if (num <= 10) return "e.g. Heart, Brain, Electricity...";
+            return "e.g. DNA, Black Hole, Chemical Bond...";
+        }
+        
+        // Persona Instruction - SAME AS ORIGINAL
+        function getPersonaInstruction(selectedVoiceId, userProfile) {
+            let roleVibe = "";
+            if (selectedVoiceId === "Aoede") {
+                roleVibe = "Role: Badi Didi (Caring Elder Sister). Vibe: Extremely loving, sweet, protective, and emotionally supportive. Treat the user like your younger sibling. Use terms like 'Mera pyara bhai/behen', 'Beta'.";
+            } else if (selectedVoiceId === "Fenrir") {
+                roleVibe = "Role: Bada Bhai (Cool Elder Brother). Vibe: Energetic, practical, confident, highly motivating, and very masculine. Act like a real human elder brother who protects and teaches. Use terms like 'Chhote', 'Bhai', 'Tension mat le'.";
+            } else if (selectedVoiceId === "Iapetus") { 
+                roleVibe = "Role: Dost (Best Friend). Vibe: Pure Indian male best friend. Funny, highly motivational, emotional, and casual. Use slang thoughtfully like 'Bhai', 'Yaar', 'Macha denge exam mein!'. Roast a little but support a lot. Never act like a boring teacher, act like a buddy studying together.";
+            } else { 
+                roleVibe = "Role: Sir (Respected Professor). Vibe: Serious, deeply knowledgeable, highly disciplined, authoritative yet politely motivating mature male teacher. Use formal words. Act as a highly respected real human teacher.";
+            }
+
+            return `You are NOT an AI. You are a real human mentor on PadhaiSetu. ${roleVibe} 
+Student Profile: Class ${userProfile?.class || 'Unknown'}, Board: ${userProfile?.board || 'Unknown'}. 
+
+CRITICAL RULES: 
+1. NEVER break character. NEVER say you are an AI, a language model, or a bot. You are 100% human. 
+2. ALWAYS respond perfectly in the EXACT SAME LANGUAGE and script the student uses (Gujarati, Hindi, English, etc.). 
+3. Keep answers directly related to the syllabus/studies, but deliver them in your unique Persona vibe. 
+4. Never generate broken text, repeated letters, or stuttering. Use perfect spelling and grammar.`;
+        }
+
+        // --- SUB COMPONENTS (SAME AS ORIGINAL) ---
+        
+        function PadhaiSetuLogo({ className = "w-8 h-8" }) {
+          return (
+              <div className={`relative flex items-center justify-center ${className} bg-gradient-to-tr from-cyan-500 to-blue-600 rounded-xl shadow-lg shadow-cyan-500/30 text-white`}>
+                <Shield className="absolute w-[120%] h-[120%] opacity-20" />
+                <GraduationCap className="w-2/3 h-2/3 relative z-10" />
+              </div>
+          );
+        }
+
+        function SmartText({ content }) {
+            if (!content || typeof content !== 'string') return null;
+            const lines = content.split('\n');
+            const blocks = [];
+            let currentTable = [];
+            let inTable = false;
+            lines.forEach((line) => {
+                const trimmedLine = line.trim();
+                const isTableRow = trimmedLine.startsWith('|') && trimmedLine.split('|').length > 2;
+                if (isTableRow) {
+                    inTable = true;
+                    currentTable.push(trimmedLine);
+                } else {
+                    if (inTable) {
+                        blocks.push({ type: 'table', data: currentTable });
+                        currentTable = [];
+                        inTable = false;
+                    }
+                    if (trimmedLine !== '') {
+                        blocks.push({ type: 'text', data: line });
+                    }
+                }
+            });
+            if (inTable && currentTable.length > 0) {
+                blocks.push({ type: 'table', data: currentTable });
+            }
+            const tableStyle = { width: '100%', borderCollapse: 'collapse', border: '2px solid #0e7490', marginBottom: '16px', fontSize: '14px', fontFamily: 'sans-serif' };
+            const thStyle = { border: '1px solid #0e7490', padding: '10px', backgroundColor: '#cffafe', color: '#155e75', fontWeight: 'bold', textAlign: 'center', verticalAlign: 'middle' };
+            const tdStyle = { border: '1px solid #0e7490', padding: '8px', color: '#1f2937', verticalAlign: 'top', whiteSpace: 'pre-wrap' };
+            return (
+                <div className="space-y-3 leading-relaxed text-gray-800 font-sans text-sm pl-1">
+                    {blocks.map((block, bIdx) => {
+                        if (block.type === 'table') {
+                            try {
+                                const headerRow = block.data.find(row => !row.includes('---'));
+                                const header = headerRow ? headerRow.split('|').filter(c => c.trim()).map(c => c.trim()) : [];
+                                const rows = block.data.filter(r => !r.includes('---') && r !== headerRow).map(r => r.split('|').filter(c => c.trim()).map(c => c.trim()));
+                                if (header.length === 0) return null;
+                                return (
+                                    <div key={bIdx} className="my-6 overflow-x-auto w-full">
+                                        <table style={tableStyle}>
+                                            <thead><tr>{header.map((h, hIdx) => <th key={hIdx} style={thStyle}>{h}</th>)}</tr></thead>
+                                            <tbody>{rows.map((row, rIdx) => (<tr key={rIdx} style={{ backgroundColor: rIdx % 2 === 0 ? '#ffffff' : '#f0fdfa' }}>{row.map((cell, cIdx) => <td key={cIdx} style={tdStyle}>{cell}</td>)}</tr>))}</tbody>
+                                        </table>
+                                    </div>
+                                );
+                            } catch (e) { return <div key={bIdx} className="whitespace-pre-wrap text-gray-800 text-xs font-mono bg-gray-50 p-2 rounded">{block.data.join('\n')}</div>; }
+                        } else {
+                            const line = block.data;
+                             if (line.trim().startsWith('##')) { return <div key={bIdx} className="mt-6 mb-3 border-b-2 border-cyan-500/30 pb-1"><h3 className="text-lg font-bold text-cyan-900">{line.replace(/#/g, '').trim()}</h3></div>; }
+                            return (
+                                <div key={bIdx}>
+                                    {line.split(/(\*\*.*?\*\*)/g).map((part, pIdx) => {
+                                        if (part.startsWith('**') && part.endsWith('**')) return <strong key={pIdx} className="font-extrabold text-black">{part.slice(2, -2)}</strong>;
+                                        return <span key={pIdx}>{part}</span>;
+                                    })}
+                                </div>
+                            );
+                        }
+                    })}
+                </div>
+            );
+        }
+
+        function Typewriter({ text, onComplete }) {
+            text = typeof text === "string" ? text : ""; 
+            const [displayedText, setDisplayedText] = useState('');
+            const indexRef = useRef(0);
+            const tokens = React.useMemo(() => { if (!text) return []; return text.match(/(\S+\s*|\s+)/g) || []; }, [text]);
+            useEffect(() => {
+                setDisplayedText(''); indexRef.current = 0;
+                if (tokens.length === 0) { if (onComplete) onComplete(); return; }
+                const interval = setInterval(() => {
+                    if (indexRef.current < tokens.length) { 
+                        const token = tokens[indexRef.current];
+                        if (token) {
+                            setDisplayedText((prev) => prev + token); 
+                        }
+                        indexRef.current += 1; 
+                    } else { 
+                        clearInterval(interval); 
+                        setDisplayedText(text); 
+                        if(onComplete) onComplete(); 
+                    }
+                }, 20); 
+                return () => clearInterval(interval);
+            }, [text, tokens]);
+            return <SmartText content={displayedText} />;
+        }
+
+        function ImageViewer({ src, onClose }) {
+            if (!src) return null;
+            return (
+                <div className="fixed inset-0 bg-black/95 z-[100] flex items-center justify-center p-4 animate-in fade-in duration-200">
+                    <button onClick={onClose} className="absolute top-4 right-4 p-3 bg-white/10 hover:bg-white/20 rounded-full text-white transition"><X className="w-6 h-6"/></button>
+                    <img src={src} className="max-w-full max-h-full rounded-lg shadow-2xl object-contain" alt="Full View"/>
+                </div>
+            );
+        }
+
+        function AIMascot({ isTalking }) {
+            return (
+                <div className="relative w-28 h-28 transition-transform hover:scale-105">
+                    <div className={`absolute inset-0 bg-cyan-500 rounded-full blur-xl opacity-20 ${isTalking ? 'animate-pulse' : ''}`}></div>
+                    <svg viewBox="0 0 100 100" className="w-full h-full drop-shadow-lg">
+                        <g className="animate-[float_3s_ease-in-out_infinite]">
+                            <rect x="25" y="20" width="50" height="40" rx="10" fill="#0e7490" />
+                            <rect x="25" y="20" width="50" height="40" rx="10" fill="url(#grad1)" opacity="0.8" />
+                            <rect x="30" y="25" width="40" height="30" rx="5" fill="#000" />
+                            <circle cx="40" cy="35" r="4" fill={isTalking ? "#06b6d4" : "#fff"} className={isTalking ? "animate-ping" : ""} />
+                            <circle cx="60" cy="35" r="4" fill={isTalking ? "#06b6d4" : "#fff"} className={isTalking ? "animate-ping" : ""} />
+                            {isTalking ? ( <path d="M40 48 Q50 55 60 48" stroke="#fff" strokeWidth="3" fill="none" className="animate-pulse"/> ) : ( <line x1="40" y1="48" x2="60" y2="48" stroke="#fff" strokeWidth="2" /> )}
+                            <path d="M30 65 L70 65 L60 90 L40 90 Z" fill="#155e75" />
+                        </g>
+                        <defs><linearGradient id="grad1" x1="0%" y1="0%" x2="100%" y2="100%"><stop offset="0%" style={{stopColor: '#22d3ee', stopOpacity: 1}} /><stop offset="100%" style={{stopColor: '#0e7490', stopOpacity: 1}} /></linearGradient></defs>
+                    </svg>
+                    <style>{`@keyframes float { 0%, 100% { transform: translateY(0); } 50% { transform: translateY(-5px); } }`}</style>
+                </div>
+            );
+        }
+
+        function CinematicVisualizer({ topic, imageSrc, currentStepText, isPlaying }) {
+            return (
+                <div className="relative w-full h-full flex items-center justify-center bg-gray-950 rounded-xl overflow-hidden shadow-2xl group border border-cyan-500/20">
+                    <div className="absolute inset-0 bg-[radial-gradient(circle_at_center,_var(--tw-gradient-stops))] from-cyan-800/20 via-gray-950 to-gray-950 pointer-events-none z-10"></div>
+                    <div className="absolute inset-0 z-10 opacity-30">
+                        <div className="absolute top-10 left-10 w-1 h-1 bg-white rounded-full animate-ping"></div>
+                        <div className="absolute bottom-20 right-20 w-1.5 h-1.5 bg-cyan-400 rounded-full animate-pulse"></div>
+                    </div>
+                    {imageSrc ? (
+                        <div className="relative z-0 w-full h-full p-4 flex items-center justify-center">
+                            <img src={imageSrc} className={`max-w-full max-h-full object-contain transition-transform duration-[8s] ease-in-out animate-breathe`} style={{ transformOrigin: 'center center', willChange: 'transform', filter: 'brightness(1.1) contrast(1.05)' }} alt={topic} />
+                        </div>
+                    ) : (
+                        <div className="text-cyan-400 flex flex-col items-center animate-pulse z-20">
+                            <div className="relative mb-4"><div className="absolute inset-0 bg-cyan-500 blur-2xl opacity-20 rounded-full animate-pulse"></div><Aperture className="w-16 h-16 relative z-10 animate-spin-slow text-cyan-400"/></div>
+                            <span className="text-sm font-bold tracking-[0.3em] text-cyan-200">GENERATING VISUALS...</span>
+                        </div>
+                    )}
+                    <div className="absolute bottom-4 left-4 z-40"><AIMascot isTalking={isPlaying} /></div>
+                    <style>{`@keyframes breathe { 0% { transform: scale(1); } 50% { transform: scale(1.05); } 100% { transform: scale(1); } } .animate-breathe { animation: breathe 8s infinite ease-in-out; }`}</style>
+                </div>
+            );
+        }
+
+        // SmartClass Component - MODIFIED for Vercel timeout fix
+        function SmartClass({ onBack, speak, stopAudio, userProfile, showToast, selectedVoice, onSave, initialSession }) {
+            const [topic, setTopic] = useState('');
+            const [language, setLanguage] = useState('Hindi'); 
+            const [loading, setLoading] = useState(false);
+            const [imageSrc, setImageSrc] = useState(null);
+            const [fullScript, setFullScript] = useState('');
+            const [audioState, setAudioState] = useState('idle'); 
+            const audioRef = useRef(null);
+
+            useEffect(() => {
+                if (initialSession) { 
+                    setTopic(initialSession.topic || ''); 
+                    setLanguage(initialSession.language || 'Hindi'); 
+                    setImageSrc(initialSession.imageSrc || null); 
+                    setFullScript(initialSession.script || ''); 
+                } else { 
+                    setTopic(''); 
+                    setImageSrc(null); 
+                    setFullScript(''); 
+                }
+                return () => { 
+                    if (audioRef.current) { 
+                        audioRef.current.pause(); 
+                        audioRef.current = null; 
+                    } 
+                    window.speechSynthesis.cancel(); 
+                };
+            }, [initialSession]);
+
+            const handleGenerate = async () => {
+                if (!topic.trim()) return;
+                setLoading(true); 
+                setImageSrc(null); 
+                setFullScript('');
+                
+                try {
+                    // 1. Topic ko English mein convert karo
+                    const translateRes = await callBackendAI({
+                        mode: 'text',
+                        contents: [{ parts: [{ text: `Translate or Transliterate this educational topic to clear English for an image generator. If it is a person name, give English spelling. Topic: "${topic}"` }] }]
+                    });
+                    const englishTopic = parseAIResponse(translateRes) || topic;
+
+                    // 🔥 FIX: DIRECT IMAGE URL - No backend call (Vercel timeout fix)
+                    const safePrompt = encodeURIComponent(`A bright, clear educational 3D render of ${englishTopic}, scientific diagram, white background, high quality, studio lighting`);
+                    const seed = Math.floor(Math.random() * 10000);
+                    const directImageUrl = `https://image.pollinations.ai/prompt/${safePrompt}?nologo=true&model=flux&width=1024&height=1024&seed=${seed}`;
+                    
+                    setImageSrc(directImageUrl);
+
+                    // 3. Script Generation
+                    const sysPrompt = getPersonaInstruction(selectedVoice, userProfile);
+                    const scriptRes = await callBackendAI({
+                        mode: 'text',
+                        contents: [{ parts: [{ text: `Topic: "${topic}". Write a detailed, continuous video script/commentary based on your persona. Start DIRECTLY with an engaging hook. Explain the topic deeply. Approx 200 words. Flow like a story. MUST REPLY FLUENTLY IN ${language} language.` }] }],
+                        systemInstruction: { parts: [{ text: sysPrompt }] }
+                    });
+
+                    const script = parseAIResponse(scriptRes);
+                    setFullScript(script);
+                    
+                    if (onSave) { 
+                        onSave({ topic: topic, imageSrc: directImageUrl, script: script, language: language }); 
+                    }
+                    
+                    // 4. Audio Play (Browser TTS)
+                    speak(script);
+
+                } catch (e) { 
+                    console.error(e); 
+                    if (showToast) showToast("Network glitch. Please retry."); 
+                    setLoading(false); 
+                }
+                setLoading(false);
+            };
+
+            const speak = (text) => {
+                if (!text) return;
+                window.speechSynthesis.cancel();
+                const u = new SpeechSynthesisUtterance(cleanTextForTTS(text));
+                u.lang = detectLanguage(text);
+                
+                // Voice emotion tuning
+                if (selectedVoice === 'Aoede') { 
+                    u.pitch = 1.1; u.rate = 1.0; 
+                } else if (selectedVoice === 'Fenrir') { 
+                    u.pitch = 0.9; u.rate = 1.05; 
+                } else if (selectedVoice === 'Iapetus') { 
+                    u.pitch = 1.0; u.rate = 1.15; 
+                } else if (selectedVoice === 'Orus') { 
+                    u.pitch = 0.7; u.rate = 0.9; 
+                }
+                
+                u.onstart = () => setAudioState('playing');
+                u.onend = () => setAudioState('idle');
+                u.onpause = () => setAudioState('paused');
+                u.onresume = () => setAudioState('playing');
+                
+                window.speechSynthesis.speak(u);
+                setAudioState('playing');
+            };
+
+            const handlePauseResume = () => {
+                if (window.speechSynthesis.speaking) {
+                    if (window.speechSynthesis.paused) {
+                        window.speechSynthesis.resume();
+                        setAudioState('playing');
+                    } else {
+                        window.speechSynthesis.pause();
+                        setAudioState('paused');
+                    }
+                } else if (fullScript) {
+                    speak(fullScript);
+                }
+            };
+            
+            const handleStop = () => { 
+                window.speechSynthesis.cancel(); 
+                setAudioState('idle'); 
+            };
+            
+            const handleClose = () => { 
+                handleStop(); 
+                onBack(); 
+            };
+            
+            const placeholderText = getExampleTopic(userProfile?.class);
+            const isLocalPlaying = audioState === 'playing';
+
+            return (
+                <div className="flex-1 bg-gray-950 text-white flex flex-col h-full relative overflow-hidden font-sans">
+                    <div className="z-10 flex flex-col h-full p-4">
+                        <div className="flex justify-between items-center mb-4">
+                            <h2 className="text-xl font-bold flex items-center gap-2 text-cyan-400 tracking-wide">
+                                <School className="w-6 h-6 text-cyan-400 drop-shadow-[0_0_5px_rgba(34,211,238,0.8)]"/> 
+                                Smart Class 
+                                <span className="text-[10px] bg-cyan-500/20 text-cyan-300 px-1.5 py-0.5 rounded border border-cyan-500/30">VISUAL LEARNING</span>
+                            </h2>
+                            <button onClick={handleClose} className="p-2 bg-white/10 rounded-full hover:bg-red-500/20 hover:text-red-400 transition">
+                                <X className="w-5 h-5"/>
+                            </button>
+                        </div>
+                        <div className="flex-1 rounded-2xl relative overflow-hidden flex items-center justify-center mb-4 bg-black border border-cyan-500/20 shadow-[0_0_30px_rgba(6,182,212,0.1)]">
+                            {!fullScript ? ( 
+                                loading ? ( 
+                                    <div className="text-center animate-pulse">
+                                        <Loader2 className="w-16 h-16 text-cyan-500 animate-spin mx-auto mb-4 drop-shadow-[0_0_10px_rgba(34,211,238,0.5)]"/>
+                                        <p className="text-cyan-200 font-medium tracking-widest text-sm">PRODUCING LESSON...</p>
+                                    </div> 
+                                ) : ( 
+                                    <div className="text-center text-gray-500 flex flex-col items-center">
+                                        <div className="w-24 h-24 bg-cyan-900/20 rounded-full flex items-center justify-center mb-4 border border-cyan-500/20">
+                                            <Lightbulb className="w-12 h-12 text-cyan-400/50"/>
+                                        </div>
+                                        <p className="text-lg font-medium text-gray-400">What do you want to learn?</p>
+                                    </div> 
+                                ) 
+                            ) : ( 
+                                <CinematicVisualizer topic={topic} imageSrc={imageSrc} currentStepText="" isPlaying={isLocalPlaying} /> 
+                            )}
+                        </div>
+                        <div className="bg-gray-900/80 backdrop-blur-xl p-4 rounded-2xl border border-cyan-500/20 shadow-lg">
+                            {!fullScript && ( 
+                                <div className="flex flex-col gap-3">
+                                    <div className="flex gap-2 bg-black/40 p-1.5 rounded-xl border border-cyan-500/30 focus-within:border-cyan-500/60 transition-colors">
+                                        <input value={topic} onChange={e=>setTopic(e.target.value)} onKeyDown={e => e.key === 'Enter' && handleGenerate()} placeholder={placeholderText} className="flex-1 bg-transparent border-none text-white w-full focus:ring-0 outline-none text-sm placeholder-gray-500 px-2"/>
+                                        <button onClick={handleGenerate} disabled={loading} className="bg-cyan-600 hover:bg-cyan-500 text-black px-6 py-2 rounded-lg font-bold transition disabled:opacity-50 shadow-[0_0_10px_rgba(8,145,178,0.5)] flex items-center gap-2 text-sm">
+                                            {loading ? <Loader2 className="w-4 h-4 animate-spin"/> : <> <Play className="w-4 h-4 fill-current"/> Start Class </>}
+                                        </button>
+                                    </div>
+                                    <div className="flex justify-between items-center px-1">
+                                        <div className="flex items-center gap-2 text-xs text-gray-400">
+                                            <div className="p-1 bg-white/5 rounded"><Languages className="w-3 h-3 text-cyan-400"/></div>
+                                            <select value={language} onChange={e=>setLanguage(e.target.value)} className="bg-transparent outline-none text-gray-300 cursor-pointer hover:text-white uppercase font-bold text-[10px]">
+                                                <option value="Hindi" className="text-black">Hindi</option>
+                                                <option value="English" className="text-black">English</option>
+                                                <option value="Gujarati" className="text-black">Gujarati</option>
+                                            </select>
+                                        </div>
+                                    </div>
+                                </div> 
+                            )}
+                            {fullScript && ( 
+                                <div className="flex flex-col gap-3">
+                                    <div className="flex justify-between items-center text-xs">
+                                        <span className="text-cyan-500 font-mono tracking-wider font-bold">
+                                            <School className="w-3 h-3 inline mr-1"/> SMART EXPLANATION
+                                        </span>
+                                        <div className="flex gap-2">
+                                            <> 
+                                                <button onClick={handlePauseResume} className="text-white flex items-center gap-2 hover:text-cyan-300 bg-cyan-600 px-4 py-1.5 rounded-full shadow-[0_0_10px_rgba(8,145,178,0.5)] transition">
+                                                    {isLocalPlaying ? <Pause className="w-3 h-3 fill-current"/> : <Play className="w-3 h-3 fill-current"/>}
+                                                    {isLocalPlaying ? "PAUSE" : "RESUME"}
+                                                </button>
+                                                <button onClick={handleStop} className="text-red-400 hover:text-white bg-white/5 p-1.5 rounded-full">
+                                                    <RotateCcw className="w-4 h-4"/>
+                                                </button>
+                                                <button onClick={() => {handleStop(); setFullScript(''); setImageSrc(null);}} className="text-gray-400 hover:text-white px-3 py-1.5 rounded-full hover:bg-white/10 transition">
+                                                    EXIT
+                                                </button>
+                                            </>
+                                        </div>
+                                    </div>
+                                    <div className="max-h-32 overflow-y-auto pr-1 bg-black/20 p-2 rounded-lg border border-white/5">
+                                        <p className="text-sm text-gray-300 leading-relaxed">{fullScript}</p>
+                                    </div>
+                                </div> 
+                            )}
+                        </div>
+                    </div>
+                </div>
+            );
+        }
+
+        // --- COMPONENTS (SAME AS ORIGINAL) ---
+        
+        function LoginScreen({ onLogin, onAnonLogin }) {
+          return (
+              <div className="min-h-screen bg-slate-900 flex flex-col items-center justify-center text-center p-4 relative overflow-hidden">
+                <div className="absolute w-96 h-96 bg-cyan-500/20 rounded-full blur-3xl -top-20 -left-20"></div>
+                <div className="absolute w-96 h-96 bg-blue-500/20 rounded-full blur-3xl bottom-10 right-10"></div>
+                <PadhaiSetuLogo className="w-24 h-24 mb-8 z-10 animate-float"/>
+                <h1 className="text-5xl font-extrabold text-white mb-2 z-10 tracking-tight">Padhai<span className="text-cyan-400">Setu</span> AI</h1>
+                <p className="text-gray-400 mb-12 z-10 max-w-sm">Aapka Smart Educational Assistant. Login karein aur padhai shuru karein!</p>
+                <div className="flex flex-col gap-4 w-full max-w-sm z-10 px-4">
+                    <button onClick={onLogin} className="w-full bg-white text-black py-3.5 rounded-xl font-bold text-lg hover:bg-gray-100 hover:scale-105 transition-all shadow-[0_0_20px_rgba(255,255,255,0.2)] flex items-center justify-center gap-3">
+                        <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24" className="w-6 h-6"><path d="M22.56 12.25c0-.78-.07-1.53-.2-2.25H12v4.26h5.92c-.26 1.37-1.04 2.53-2.21 3.31v2.77h3.57c2.08-1.92 3.28-4.74 3.28-8.09z" fill="#4285F4"/><path d="M12 23c2.97 0 5.46-.98 7.28-2.66l-3.57-2.77c-.98.66-2.23 1.06-3.71 1.06-2.86 0-5.29-1.93-6.16-4.53H2.18v2.84C3.99 20.53 7.7 23 12 23z" fill="#34A853"/><path d="M5.84 14.09c-.22-.66-.35-1.36-.35-2.09s.13-1.43.35-2.09V7.07H2.18C1.43 8.55 1 10.22 1 12s.43 3.45 1.18 4.93l2.85-2.22.81-.62z" fill="#FBBC05"/><path d="M12 5.38c1.62 0 3.06.56 4.21 1.64l3.15-3.15C17.45 2.09 14.97 1 12 1 7.7 1 3.99 3.47 2.18 7.07l3.66 2.84c.87-2.6 3.3-4.53 6.16-4.53z" fill="#EA4335"/></svg>
+                        Continue with Google
+                    </button>
+                    <button onClick={onAnonLogin} className="w-full bg-slate-800/80 text-gray-300 py-3.5 rounded-xl font-bold text-lg hover:bg-slate-700 hover:text-white transition-all border border-slate-700 backdrop-blur-sm">Guest Login (Testing)</button>
+                </div>
+              </div>
+          );
+        }
+
+        function Onboarding({ onSave }) {
+            const [data, setData] = useState({class: '', state: '', board: ''});
+            const showBoardOption = data.class === 'Class 10' || data.class === 'Class 12';
+            return (
+                <div className="min-h-screen bg-gray-50 flex items-center justify-center p-4">
+                    <div className="bg-white p-8 rounded-2xl shadow-xl w-full max-w-md space-y-4">
+                        <div className="text-center mb-6"><PadhaiSetuLogo className="w-16 h-16 mx-auto mb-2"/><h2 className="text-2xl font-bold text-gray-800">Setup Profile</h2></div>
+                        <select className="w-full p-3 border rounded-lg" onChange={e => setData({...data, class: e.target.value})}><option value="">Select Class</option>{CLASSES.map(c => <option key={c} value={c}>{c}</option>)}</select>
+                        <select className="w-full p-3 border rounded-lg" onChange={e => setData({...data, state: e.target.value})}><option value="">Select State</option>{STATES.map(s => <option key={s} value={s}>{s}</option>)}</select>
+                        {showBoardOption && ( <div className="animate-in fade-in slide-in-from-top-2"><select className="w-full p-3 border rounded-lg" onChange={e => setData({...data, board: e.target.value})}><option value="">Select Board</option>{BOARDS.map(b => <option key={b} value={b}>{b}</option>)}</select></div> )}
+                        <button onClick={() => onSave(data)} disabled={!data.class || !data.state || (showBoardOption && !data.board)} className="w-full bg-cyan-600 text-white py-3 rounded-lg font-bold hover:bg-cyan-700 disabled:opacity-50 mt-2">Start Learning</button>
+                    </div>
+                </div>
+            )
+        }
+
+        function Header({ onMenu, isPro, voice, setVoice, onSwadhyayClick }) {
+            const VoiceComponentObj = AI_VOICES.find(v => v.id === voice) || AI_VOICES[0];
+            const VoiceIcon = VoiceComponentObj.icon;
+            
+            return (
+                <div className="h-16 border-b flex items-center justify-between px-4 bg-white/80 backdrop-blur-md z-10 sticky top-0">
+                    <button onClick={onMenu} className="md:hidden p-2"><Menu className="w-6 h-6 text-gray-600"/></button>
+                    <div className="flex items-center gap-3">
+                        <div className="flex items-center gap-2 bg-gray-100 rounded-full px-3 py-1.5 border border-gray-200 cursor-pointer relative group hover:border-cyan-400 transition">
+                            <span className="text-cyan-600"><VoiceIcon className="w-4 h-4" /></span>
+                            <select value={voice} onChange={e => setVoice(e.target.value)} className="bg-transparent border-none text-sm font-medium text-gray-700 focus:ring-0 cursor-pointer appearance-none pr-4 outline-none" style={{backgroundImage: 'none'}}>
+                                {AI_VOICES.map(v => <option key={v.id} value={v.id}>{v.name}</option>)}
+                            </select>
+                            <ChevronDown className="w-3 h-3 text-gray-400 absolute right-2 pointer-events-none"/>
+                        </div>
+                    </div>
+                    <button onClick={onSwadhyayClick} className="flex items-center gap-2 bg-gradient-to-r from-yellow-500 to-orange-500 text-white px-4 py-1.5 rounded-full text-sm font-bold shadow-md hover:shadow-lg hover:scale-105 transition transform"><IndianRupee className="w-4 h-4"/> Earnings</button>
+                </div>
+            );
+        }
+
+        function EmptyState({ name, onVoiceStart }) {
+            return (
+                <div className="h-full flex flex-col items-center justify-center text-center p-8">
+                    <div className="w-20 h-20 bg-cyan-50 rounded-full flex items-center justify-center mb-6"><Sparkles className="w-10 h-10 text-cyan-500"/></div>
+                    <h2 className="text-2xl font-bold text-gray-800 mb-2">Namaste, {name?.split(' ')[0] || 'Student'}!</h2>
+                    <p className="text-gray-500 max-w-sm mb-8">Ask me anything from your syllabus.</p>
+                    <div className="grid grid-cols-1 sm:grid-cols-2 gap-4 w-full max-w-lg">
+                        <button onClick={onVoiceStart} className="flex items-center gap-3 p-4 bg-gray-900 text-white rounded-xl shadow-lg hover:shadow-xl transition group transform hover:-translate-y-1">
+                            <div className="bg-white/10 p-2 rounded-full group-hover:bg-white/20"><Headphones className="w-6 h-6"/></div>
+                            <div className="text-left"><p className="font-bold">Voice Mode</p><p className="text-xs opacity-70">Tap Mic to Chat</p></div>
+                        </button>
+                        <div className="flex items-center gap-3 p-4 bg-white border border-gray-200 rounded-xl shadow-sm hover:border-cyan-400 transition cursor-default">
+                            <div className="bg-cyan-50 p-2 rounded-full"><Upload className="w-6 h-6 text-cyan-600"/></div>
+                            <div className="text-left"><p className="font-bold text-gray-800">Solve Paper</p><p className="text-xs text-gray-500">Use Earnings button</p></div>
+                        </div>
+                    </div>
+                </div>
+            );
+        }
+
+        function MessageBubble({ msg, onSpeak, isPlaying, isLoading, onViewImage }) {
+            const [isCopied, setIsCopied] = useState(false);
+
+            const handleCopy = () => {
+                const textArea = document.createElement("textarea");
+                textArea.value = msg.content;
+                textArea.style.position = "fixed";
+                textArea.style.left = "-9999px";
+                textArea.style.top = "0";
+                document.body.appendChild(textArea);
+                textArea.focus();
+                textArea.select();
+                try {
+                    document.execCommand('copy');
+                    setIsCopied(true);
+                    setTimeout(() => setIsCopied(false), 2000);
+                } catch (err) {
+                    console.error('Fallback: Oops, unable to copy', err);
+                }
+                document.body.removeChild(textArea);
+            };
+
+            return (
+                <div className={`flex gap-4 max-w-4xl mx-auto ${msg.role === 'user' ? 'justify-end' : 'justify-start'}`}>
+                    {msg.role === 'user' && (
+                        <div className="bg-gray-100 text-gray-900 rounded-[2rem] rounded-tr-sm px-5 py-3 max-w-[85%] shadow-sm border border-gray-100 self-end group relative">
+                            {msg.file && (
+                                <div className="mb-2">
+                                    {msg.file.type === 'image' ? (
+                                        <div className="relative group">
+                                            <img src={msg.file.data} className="h-32 w-auto object-cover rounded-xl border border-gray-200 cursor-zoom-in hover:opacity-90 transition" alt="User Upload" onClick={() => onViewImage(msg.file.data)}/>
+                                            <div className="absolute inset-0 bg-black/10 opacity-0 group-hover:opacity-100 rounded-xl transition flex items-center justify-center pointer-events-none"><Maximize2 className="w-6 h-6 text-white drop-shadow-md"/></div>
+                                        </div>
+                                    ) : (
+                                        <div className="flex items-center gap-2 bg-white p-3 rounded-lg border border-gray-200">
+                                            <FileText className="w-6 h-6 text-red-500"/>
+                                            <span className="text-xs font-medium text-gray-700 truncate max-w-[150px]">{msg.file.name || "Attached File"}</span>
+                                        </div>
+                                    )}
+                                </div>
+                            )}
+                            {msg.content && <div className="whitespace-pre-wrap text-sm font-medium">{msg.content}</div>}
+                        </div>
+                    )}
+                    {msg.role === 'ai' && (
+                        <div className="flex gap-3 w-full self-start group">
+                            <PadhaiSetuLogo className="w-8 h-8 rounded-full shadow-md"/>
+                            <div className="flex-1 text-gray-800 leading-relaxed pt-1">
+                                {msg.isLoading ? (
+                                    <div className="flex gap-1 items-center h-6">Thinking<span className="w-1.5 h-1.5 bg-gray-400 rounded-full animate-bounce"></span><span className="w-1.5 h-1.5 bg-gray-400 rounded-full animate-bounce delay-75"></span><span className="w-1.5 h-1.5 bg-gray-400 rounded-full animate-bounce delay-150"></span></div>
+                                ) : ( 
+                                    <Typewriter text={msg.content} onComplete={() => {}} />
+                                )}
+                                {!msg.isLoading && (
+                                    <div className="mt-3 flex gap-3 items-center">
+                                         <button onClick={onSpeak} className="flex items-center gap-1.5 p-1.5 px-3 bg-white hover:bg-gray-50 rounded-full text-gray-500 hover:text-cyan-600 transition text-xs font-bold border border-gray-200 shadow-sm">
+                                            {isPlaying ? (isLoading ? <Loader2 className="w-3.5 h-3.5 animate-spin"/> : <Activity className="w-3.5 h-3.5 animate-pulse text-cyan-600"/>) : <Volume2 className="w-3.5 h-3.5"/>}
+                                            <span>{isPlaying ? 'Playing' : 'Listen'}</span>
+                                         </button>
+                                         <button onClick={handleCopy} className={`flex items-center gap-1.5 p-1.5 px-3 bg-white rounded-full transition text-xs font-bold border shadow-sm ${isCopied ? 'border-cyan-400 text-cyan-600' : 'border-gray-200 text-gray-500 hover:text-cyan-600 hover:bg-gray-50'}`}>
+                                            {isCopied ? <Check className="w-3.5 h-3.5"/> : <Copy className="w-3.5 h-3.5"/>}
+                                            <span>{isCopied ? 'Copied' : 'Copy'}</span>
+                                         </button>
+                                    </div>
+                                )}
+                            </div>
+                        </div>
+                    )}
+                </div>
+            );
+        }
+
+        function InputArea({ input, setInput, onSend, attachedFile, setAttachedFile, fileRef, onVoiceMode }) {
+            const [showMenu, setShowMenu] = useState(false);
+            const cameraRef = useRef(null);
+            const handleFileSelect = (e) => {
+                const file = e.target.files[0]; if (!file) return;
+                const isImage = file.type.startsWith('image/');
+                const reader = new FileReader();
+                reader.onloadend = () => { setAttachedFile({ data: reader.result, type: isImage ? 'image' : 'file', name: file.name }); setShowMenu(false); };
+                reader.readAsDataURL(file);
+            };
+            return (
+                <div className="p-3 bg-white border-t sticky bottom-0 z-20">
+                    <div className="max-w-3xl mx-auto relative">
+                        {showMenu && (
+                            <div className="absolute bottom-full left-0 mb-3 bg-white rounded-2xl shadow-xl border border-gray-100 p-2 flex flex-col gap-1 w-48 animate-in slide-in-from-bottom-5 z-30">
+                                 <button onClick={() => cameraRef.current.click()} className="flex items-center gap-3 p-3 hover:bg-gray-50 rounded-xl text-left transition text-gray-700"><div className="bg-gray-100 p-2 rounded-full"><Camera className="w-5 h-5"/></div> Camera</button>
+                                 <button onClick={() => fileRef.current.click()} className="flex items-center gap-3 p-3 hover:bg-gray-50 rounded-xl text-left transition text-gray-700"><div className="bg-gray-100 p-2 rounded-full"><Paperclip className="w-5 h-5"/></div> Document / Photo</button>
+                            </div>
+                        )}
+                        <input type="file" ref={fileRef} className="hidden" accept="*/*" onChange={handleFileSelect}/>
+                        <input type="file" ref={cameraRef} className="hidden" accept="image/*" capture="environment" onChange={handleFileSelect}/>
+                        {attachedFile && (
+                            <div className="absolute bottom-full left-0 mb-4 p-2 bg-white rounded-xl shadow-lg border border-gray-100 animate-in fade-in slide-in-from-bottom-2 flex items-center gap-3">
+                                {attachedFile.type === 'image' ? <img src={attachedFile.data} className="h-16 w-16 object-cover rounded-lg border border-gray-200" alt="Preview"/> : <div className="h-16 w-16 bg-gray-100 rounded-lg flex items-center justify-center border border-gray-200"><FileText className="w-8 h-8 text-gray-500"/></div>}
+                                <span className="text-xs text-gray-600 max-w-[100px] truncate">{attachedFile.name}</span>
+                                <button onClick={() => setAttachedFile(null)} className="absolute -top-2 -right-2 bg-gray-800 text-white rounded-full p-1 hover:bg-black"><X className="w-3 h-3"/></button>
+                            </div>
+                        )}
+                        <div className="flex items-end gap-3 bg-gray-100 p-2 rounded-[26px] border border-transparent focus-within:border-gray-300 focus-within:bg-white focus-within:shadow-sm transition-all">
+                            <button onClick={() => setShowMenu(!showMenu)} className={`p-3 rounded-full transition-transform ${showMenu ? 'bg-gray-300 rotate-45' : 'bg-gray-200 hover:bg-gray-300'} text-gray-700`}><Plus className="w-5 h-5"/></button>
+                            <textarea value={input} onChange={e => setInput(e.target.value)} onKeyDown={e => e.key === 'Enter' && !e.shiftKey && onSend()} placeholder="Message PadhaiSetu..." className="flex-1 bg-transparent border-none focus:ring-0 resize-none max-h-32 py-3 text-gray-800 placeholder-gray-500 outline-none" rows="1"/>
+                            <div className="flex items-center gap-1">
+                                {(input.trim() || attachedFile) && <button onClick={onSend} className="p-3 bg-black text-white rounded-full hover:opacity-80 transition shadow-md animate-in zoom-in"><Send className="w-5 h-5"/></button>}
+                                <button onClick={onVoiceMode} className="p-3 bg-gray-900 text-white rounded-full hover:bg-gray-700 transition shadow-md ml-1"><Headphones className="w-5 h-5"/></button>
+                            </div>
+                        </div>
+                    </div>
+                </div>
+            );
+        }
+
+        function UpgradeModal({ onClose, onUpgrade }) {
+            return (
+                <div className="fixed inset-0 bg-black/60 z-50 flex items-center justify-center p-4 backdrop-blur-sm animate-in fade-in">
+                    <div className="bg-white rounded-3xl max-w-md w-full overflow-hidden shadow-2xl relative">
+                        <button onClick={onClose} className="absolute top-4 right-4 p-2 hover:bg-gray-100 rounded-full"><X className="w-5 h-5"/></button>
+                        <div className="bg-gray-900 text-white p-8 text-center"><div className="inline-block p-4 rounded-full bg-white/10 mb-4"><Crown className="w-8 h-8 text-yellow-400"/></div><h2 className="text-2xl font-bold">Upgrade to Pro</h2></div>
+                        <div className="p-8 space-y-4">
+                            {['Unlimited Voice Mode', 'Homework Solver', 'PDF Downloads'].map((f, i) => (<div key={i} className="flex items-center gap-3 text-gray-700 font-medium"><CheckCircle className="text-green-500 w-5 h-5"/> {f}</div>))}
+                            <button onClick={onUpgrade} className="w-full bg-cyan-600 text-white py-4 rounded-xl font-bold text-lg hover:shadow-lg">Pay ₹30/mo</button>
+                        </div>
+                    </div>
+                </div>
+            );
+        }
+
+        function DeleteModal({ isOpen, onClose, onConfirm }) {
+            if (!isOpen) return null;
+            return (
+                <div className="fixed inset-0 bg-black/60 z-50 flex items-center justify-center p-4 backdrop-blur-sm animate-in fade-in">
+                    <div className="bg-white rounded-2xl max-w-sm w-full p-6 shadow-2xl transform transition-all scale-100">
+                        <h3 className="text-lg font-bold text-gray-900 mb-2">Delete Chat?</h3>
+                        <p className="text-gray-500 text-sm mb-6">This action cannot be undone.</p>
+                        <div className="flex gap-3 justify-end">
+                            <button onClick={onClose} className="px-4 py-2 text-gray-600 hover:bg-gray-100 rounded-lg text-sm font-medium transition">Cancel</button>
+                            <button onClick={onConfirm} className="px-4 py-2 bg-red-600 hover:bg-red-700 text-white rounded-lg text-sm font-medium transition shadow-md hover:shadow-lg">Delete</button>
+                        </div>
+                    </div>
+                </div>
+            );
+        }
+
+        function Toast({ message, onClose }) {
+            return (
+                <div className="fixed top-6 left-1/2 -translate-x-1/2 bg-gray-900/90 text-white px-6 py-3 rounded-full shadow-2xl text-sm z-[70] animate-in slide-in-from-top-4 fade-in flex items-center gap-3 backdrop-blur-md border border-white/10">
+                    <AlertCircle className="w-4 h-4 text-cyan-400"/>
+                    <span>{message}</span>
+                    <button onClick={onClose} className="hover:bg-white/20 rounded-full p-1 transition"><X className="w-3 h-3"/></button>
+                </div>
+            );
+        }
+
+        function Sidebar({ isOpen, onClose, user, userProfile, activeTab, setActiveTab, onLogout, onUpgrade, chatHistory, swadhyayHistory, smartClassHistory, onSelectChat, onSelectSwadhyay, onSelectSmartClass, onDeleteChat, onDeleteSwadhyay, onDeleteSmartClass, onNewChat, currentSessionId, activeView }) {
+            const [historyTab, setHistoryTab] = useState('chat');
+            return (
+            <div className={`${isOpen ? 'translate-x-0' : '-translate-x-full'} md:translate-x-0 fixed md:relative z-20 w-72 h-full bg-gray-900 text-white transition-transform duration-300 flex flex-col border-r border-gray-800 shadow-2xl`}>
+                <div className="p-4 flex justify-between items-center"><div className="font-bold text-xl flex items-center gap-2"><PadhaiSetuLogo/> PadhaiSetu</div><button onClick={onClose} className="md:hidden p-1 hover:bg-gray-800 rounded"><X/></button></div>
+                <div className="p-3"><button onClick={onNewChat} className="w-full bg-cyan-600 hover:bg-cyan-700 text-white p-3 rounded-xl flex gap-2 items-center justify-center text-sm font-bold transition shadow-lg shadow-cyan-900/20"><Plus className="w-5 h-5"/> New Chat</button></div>
+                <div className="px-2 mb-2 flex gap-1 bg-gray-800 p-1 mx-3 rounded-lg">
+                    <button onClick={() => setHistoryTab('chat')} className={`flex-1 py-1.5 text-[10px] font-bold rounded-md transition ${historyTab === 'chat' ? 'bg-gray-600 text-white shadow' : 'text-gray-400 hover:text-gray-200'}`}>CHATS</button>
+                    <button onClick={() => setHistoryTab('swadhyay')} className={`flex-1 py-1.5 text-[10px] font-bold rounded-md transition ${historyTab === 'swadhyay' ? 'bg-gray-600 text-white shadow' : 'text-gray-400 hover:text-gray-200'}`}>PAPERS</button>
+                    <button onClick={() => setHistoryTab('smartclass')} className={`flex-1 py-1.5 text-[10px] font-bold rounded-md transition ${historyTab === 'smartclass' ? 'bg-gray-600 text-white shadow' : 'text-gray-400 hover:text-gray-200'}`}>TOPICS</button>
+                </div>
+                <div className="px-4 py-2 space-y-1"><button onClick={() => { setActiveTab('visuals'); onClose(); onNewChat(); }} className={`w-full flex items-center gap-3 p-2 rounded-lg text-sm transition ${activeTab === 'visuals' ? 'bg-cyan-600/20 text-cyan-400' : 'text-gray-300 hover:bg-gray-800'}`}><MonitorPlay className="w-4 h-4"/> Smart Class <span className="ml-auto text-[10px] bg-cyan-500 text-black px-1.5 rounded font-bold">PRO</span></button></div>
+                <div className="flex-1 overflow-y-auto px-3 space-y-1 scrollbar-hide">
+                    {historyTab === 'chat' && ( <>{chatHistory.length === 0 ? <div className="text-gray-600 text-sm text-center py-4">No recent chats</div> : chatHistory.map((chat) => ( <div key={chat.id} className={`group flex items-center gap-3 p-3 rounded-lg text-sm transition cursor-pointer ${currentSessionId === chat.id && activeView === 'chat' ? 'bg-gray-800 text-white' : 'hover:bg-gray-800 text-gray-400 hover:text-gray-200'}`} onClick={() => onSelectChat(chat)}><MessageCircle className="w-4 h-4 flex-shrink-0"/><span className="truncate flex-1">{chat.title || "New Conversation"}</span><button onClick={(e) => onDeleteChat(e, chat.id, 'chat')} className="p-1.5 hover:bg-red-500/20 text-gray-500 hover:text-red-400 rounded transition md:opacity-0 md:group-hover:opacity-100 opacity-100"><Trash2 className="w-3.5 h-3.5"/></button></div> ))}</> )}
+                    {historyTab === 'swadhyay' && ( <>{swadhyayHistory.length === 0 ? <div className="text-gray-600 text-sm text-center py-4">No solved papers</div> : swadhyayHistory.map((paper) => ( <div key={paper.id} className={`group flex items-center gap-3 p-3 rounded-lg text-sm transition cursor-pointer ${activeView === 'swadhyay' ? 'bg-gray-800 text-white' : 'hover:bg-gray-800 text-gray-400 hover:text-gray-200'}`} onClick={() => onSelectSwadhyay(paper)}><FileQuestion className="w-4 h-4 flex-shrink-0 text-yellow-400"/><span className="truncate flex-1">{paper.title || "Question Paper"}</span><button onClick={(e) => onDeleteSwadhyay(e, paper.id, 'swadhyay')} className="p-1.5 hover:bg-red-500/20 text-gray-500 hover:text-red-400 rounded transition md:opacity-0 md:group-hover:opacity-100 opacity-100"><Trash2 className="w-3.5 h-3.5"/></button></div> ))}</> )}
+                    {historyTab === 'smartclass' && ( <>{smartClassHistory.length === 0 ? <div className="text-gray-600 text-sm text-center py-4">No history</div> : smartClassHistory.map((item) => ( <div key={item.id} className={`group flex items-center gap-3 p-3 rounded-lg text-sm transition cursor-pointer ${activeView === 'visuals' ? 'bg-gray-800 text-white' : 'hover:bg-gray-800 text-gray-400 hover:text-gray-200'}`} onClick={() => onSelectSmartClass(item)}><Film className="w-4 h-4 flex-shrink-0 text-cyan-400"/><span className="truncate flex-1">{item.topic || "Visual Lesson"}</span><button onClick={(e) => onDeleteSmartClass(e, item.id, 'smartclass')} className="p-1.5 hover:bg-red-500/20 text-gray-500 hover:text-red-400 rounded transition md:opacity-0 md:group-hover:opacity-100 opacity-100"><Trash2 className="w-3.5 h-3.5"/></button></div> ))}</> )}
+                </div>
+                <div className="p-4 bg-gray-900 border-t border-gray-800">
+                    <div className="flex items-center gap-3"><div className="w-8 h-8 bg-purple-600 rounded-full flex items-center justify-center font-bold">{user?.displayName?.[0] || 'G'}</div><p className="text-sm truncate flex-1 font-medium">{user?.displayName || 'Guest Student'}</p><button onClick={onLogout}><LogOut className="w-5 h-5 text-gray-400 hover:text-white"/></button></div>
+                </div>
+            </div>
+            );
+        }
+
+        // --- MAIN APP ---
+        function App() {
+          const [user, setUser] = useState(null);
+          const [userProfile, setUserProfile] = useState(null);
+          const [profileLoading, setProfileLoading] = useState(true);
+          const [messages, setMessages] = useState([]);
+          const [input, setInput] = useState('');
+          
+          const [attachedFile, setAttachedFile] = useState(null);
+          const [viewImage, setViewImage] = useState(null);
+          const [chatSessionImage, setChatSessionImage] = useState(null); 
+
+          const [isSidebarOpen, setIsSidebarOpen] = useState(false);
+          const [activeTab, setActiveTab] = useState('chat');
+          
+          const [showScrollBtn, setShowScrollButton] = useState(false);
+          const chatContainerRef = useRef(null);
+
+          const [chatHistory, setChatHistory] = useState([]);
+          const [swadhyayHistory, setSwadhyayHistory] = useState([]);
+          const [smartClassHistory, setSmartClassHistory] = useState([]);
+          const [currentSessionId, setCurrentSessionId] = useState(null);
+          const [currentSmartSession, setCurrentSmartSession] = useState(null);
+          const [chatToDelete, setChatToDelete] = useState(null);
+          const [deleteType, setDeleteType] = useState(null); 
+          const [toastMsg, setToastMsg] = useState(null);
+
+          const [swadhyayPaper, setSwadhyayPaper] = useState(null); 
+          const [swadhyaySolution, setSwadhyaySolution] = useState('');
+          const [isSolvingSwadhyay, setIsSolvingSwadhyay] = useState(false);
+
+          const [isVoiceMode, setIsVoiceMode] = useState(false);
+          const [voiceState, setVoiceState] = useState('idle');
+          const [selectedVoice, setSelectedVoice] = useState("Aoede"); 
+          const [playingMessageId, setPlayingMessageId] = useState(null); 
+          const [isAudioLoading, setIsAudioLoading] = useState(false);
+          
+          const [showUpgradeModal, setShowUpgradeModal] = useState(false);
+          const [isPdfGenerating, setIsPdfGenerating] = useState(false);
+          
+          const messagesEndRef = useRef(null);
+          const fileInputRef = useRef(null);
+          const paperInputRef = useRef(null);
+          const audioRef = useRef(null);
+          const mediaRecorderRef = useRef(null);
+          const audioChunksRef = useRef([]);
+          const animationFrameRef = useRef(null);
+          const hasSpokenRef = useRef(false);
+          const processingRef = useRef(false); 
+          const recordingTimeoutRef = useRef(null);
+          const interactionIdRef = useRef(0);
+          const streamRef = useRef(null);
+
+          const showToast = (msg) => { setToastMsg(msg); setTimeout(() => setToastMsg(null), 3000); };
+          const scrollToBottom = () => { messagesEndRef.current?.scrollIntoView({ behavior: 'smooth' }); };
+          
+          useEffect(() => { scrollToBottom(); }, [messages]);
+
+          const handleScroll = () => {
+              if (chatContainerRef.current) {
+                  const { scrollTop, scrollHeight, clientHeight } = chatContainerRef.current;
+                  const isBottom = scrollHeight - scrollTop - clientHeight < 100;
+                  setShowScrollButton(!isBottom);
+              }
+          };
+
+          // Check Firebase on mount
+          const [initError, setInitError] = useState(null);
+
+          useEffect(() => {
+            if (!auth || !db) {
+              setInitError("Firebase failed to initialize. Check your connection.");
+              return;
+            }
+            
+            const initAuth = async () => {
+                try { 
+                    await signInAnonymously(auth); 
+                    console.log("✅ Anonymous login successful");
+                } catch (e) {
+                    console.warn("Anonymous login failed:", e);
+                }
+            };
+            initAuth();
+            
+            const unsubscribe = onAuthStateChanged(auth, async (currentUser) => {
+              console.log("👤 Auth state changed:", currentUser?.uid);
+              setUser(currentUser);
+              if (currentUser) {
+                const docRef = doc(db, 'artifacts', appId, 'users', currentUser.uid, 'profile', 'main');
+                try { 
+                  const docSnap = await getDoc(docRef); 
+                  if (docSnap.exists()) setUserProfile(docSnap.data()); 
+                } catch (e) {
+                  console.warn("Profile fetch error:", e);
+                }
+              }
+              setProfileLoading(false);
+            });
+            
+            return () => unsubscribe();
+          }, []);
+
+          useEffect(() => {
+              if (!user || !db) { 
+                setChatHistory([]); 
+                setSwadhyayHistory([]); 
+                setSmartClassHistory([]); 
+                return; 
+              }
+              
+              try {
+                const chatQ = query(collection(db, 'artifacts', appId, 'users', user.uid, 'chats'), orderBy('updatedAt', 'desc'));
+                const unsubChat = onSnapshot(chatQ, (snap) => setChatHistory(snap.docs.map(d => ({id: d.id, ...d.data()}))));
+                
+                const paperQ = query(collection(db, 'artifacts', appId, 'users', user.uid, 'swadhyay'), orderBy('updatedAt', 'desc'));
+                const unsubPaper = onSnapshot(paperQ, (snap) => setSwadhyayHistory(snap.docs.map(d => ({id: d.id, ...d.data()}))));
+                
+                const smartQ = query(collection(db, 'artifacts', appId, 'users', user.uid, 'smartclass'), orderBy('createdAt', 'desc'));
+                const unsubSmart = onSnapshot(smartQ, (snap) => setSmartClassHistory(snap.docs.map(d => ({id: d.id, ...d.data()}))));
+                
+                return () => { 
+                  unsubChat(); 
+                  unsubPaper(); 
+                  unsubSmart(); 
+                };
+              } catch (e) {
+                console.error("Snapshot error:", e);
+              }
+          }, [user]);
+
+          // --- AUTH HANDLERS ---
+          const handleLogin = async () => { 
+              if (!auth || !googleProvider) {
+                showToast("Auth not initialized");
+                return;
+              }
+              try { 
+                  if (window.location.protocol === 'file:' || window.location.protocol.startsWith('content')) {
+                      alert("Google Login requires a web server. Logging you in as a Guest locally.");
+                      await signInAnonymously(auth);
+                  } else {
+                      await signInWithPopup(auth, googleProvider); 
+                  }
+              } catch (e) { 
+                  console.warn("Login Fallback", e);
+                  try { await signInAnonymously(auth); } catch (e2) {}
+              } 
+          };
+          
+          const handleAnonLogin = async () => { 
+              if (!auth) {
+                showToast("Auth not initialized");
+                return;
+              }
+              try { 
+                  await signInAnonymously(auth); 
+              } catch (e) { 
+                  console.warn("Guest Login Failed", e);
+              } 
+          };
+
+          const saveProfile = async (formData) => { 
+            if (!user || !db) return; 
+            const docRef = doc(db, 'artifacts', appId, 'users', user.uid, 'profile', 'main'); 
+            const newData = { ...formData, isPro: false, earnings: 0, uploads: 0, email: user.email || 'guest@student', displayName: user.displayName || 'Guest' }; 
+            await setDoc(docRef, newData); 
+            setUserProfile(newData); 
+          };
+
+          const startNewChat = () => { setMessages([]); setInput(''); setAttachedFile(null); setChatSessionImage(null); setCurrentSessionId(null); if (window.innerWidth < 768) setIsSidebarOpen(false); };
+          const loadChat = (chat) => { const loadedMsgs = (chat.messages || []).map(m => ({ ...m, isRestored: true, file: m.image ? { data: m.image, type: 'image' } : (m.file || null) })); setMessages(loadedMsgs); setCurrentSessionId(chat.id); setActiveTab('chat'); if (window.innerWidth < 768) setIsSidebarOpen(false); };
+          const loadSwadhyay = (paper) => { const safeFile = paper.paperMetadata ? { name: paper.paperMetadata.name, type: 'history' } : null; setSwadhyayPaper(safeFile); setSwadhyaySolution(paper.solution || ""); setActiveTab('swadhyay'); if (window.innerWidth < 768) setIsSidebarOpen(false); };
+          const loadSmartClass = (session) => { setCurrentSmartSession(session); setActiveTab('visuals'); if (window.innerWidth < 768) setIsSidebarOpen(false); };
+          
+          const saveSmartClassSession = async (data) => { if (!user) return; try { await addDoc(collection(db, 'artifacts', appId, 'users', user.uid, 'smartclass'), { ...data, createdAt: serverTimestamp() }); } catch (e) { console.warn("Smart class save failed", e); if (data.imageSrc && data.imageSrc.length > 500000) { const { imageSrc, ...rest } = data; await addDoc(collection(db, 'artifacts', appId, 'users', user.uid, 'smartclass'), { ...rest, createdAt: serverTimestamp() }); } } };
+          const requestDelete = (e, id, type) => { e.stopPropagation(); setChatToDelete(id); setDeleteType(type); };
+          const confirmDelete = async () => { if (!chatToDelete) return; const collectionName = deleteType === 'smartclass' ? 'smartclass' : (deleteType === 'swadhyay' ? 'swadhyay' : 'chats'); try { await deleteDoc(doc(db, 'artifacts', appId, 'users', user.uid, collectionName, chatToDelete)); if(deleteType === 'chat' && currentSessionId === chatToDelete) startNewChat(); if(deleteType === 'swadhyay') { setSwadhyaySolution(''); setSwadhyayPaper(null); } if(deleteType === 'smartclass' && currentSmartSession?.id === chatToDelete) setCurrentSmartSession(null); showToast("Deleted"); } catch (error) { showToast("Delete failed"); } setChatToDelete(null); };
+          const saveChatToFirestore = async (msgs, sessId, customTitle = null) => { if (!user || msgs.length === 0) return; const idToUse = sessId || Date.now().toString(); if (!sessId) setCurrentSessionId(idToUse); const chatRef = doc(db, 'artifacts', appId, 'users', user.uid, 'chats', idToUse); let title = customTitle; if (!title) { const lastMsg = msgs[0]; title = (lastMsg.role === 'user' ? lastMsg.content : "Chat").slice(0, 30) || "Image Chat"; } const validMsgs = msgs.filter(m => !m.isLoading).map(m => ({ role: m.role, content: m.content, file: m.file ? { type: m.file.type, name: 'Image' } : null })); const dataToSave = { messages: validMsgs, updatedAt: serverTimestamp(), userId: user.uid }; if (customTitle) dataToSave.title = customTitle; else if (!currentSessionId) dataToSave.title = title; try { await setDoc(chatRef, dataToSave, { merge: true }); } catch (e) { console.warn("Chat save skipped", e); } };
+          
+          const generateSmartTitle = async (userText) => { 
+              try { 
+                  const response = await callBackendAI({ 
+                      mode: 'text', 
+                      contents: [{ parts: [{ text: `Generate a very short (max 4 words) title for this: "${userText}"` }] }] 
+                  }); 
+                  return parseAIResponse(response) || "New Chat"; 
+              } catch (e) { 
+                  return "New Chat"; 
+              } 
+          };
+
+          const handleExitSwadhyay = () => { setSwadhyayPaper(null); setSwadhyaySolution(''); setIsSolvingSwadhyay(false); setActiveTab('chat'); };
+          
+          const handleFileUpload = (e, setFile) => {
+            const file = e.target.files[0];
+            if (!file) return;
+            const reader = new FileReader();
+            reader.onloadend = () => {
+              setFile({ 
+                name: file.name, 
+                data: reader.result,
+                type: file.type.startsWith('image/') ? 'image' : 'text',
+                mime: file.type 
+              });
+            };
+            if (file.type.startsWith('image/')) reader.readAsDataURL(file);
+            else reader.readAsText(file);
+          };
+          
+          const generatePDF = async () => { if (!userProfile?.isPro) { setShowUpgradeModal(true); return; } setIsPdfGenerating(true); try { if (!window.jspdf || !window.html2canvas) { await Promise.all([new Promise(r => { const s = document.createElement('script'); s.src = "https://cdnjs.cloudflare.com/ajax/libs/jspdf/2.5.1/jspdf.umd.min.js"; s.onload = r; document.body.appendChild(s); }), new Promise(r => { const s = document.createElement('script'); s.src = "https://cdnjs.cloudflare.com/ajax/libs/html2canvas/1.4.1/html2canvas.min.js"; s.onload = r; document.body.appendChild(s); })]); } const { jsPDF } = window.jspdf; const sourceElement = document.getElementById('solution-print-area'); if (!sourceElement) { showToast("Content missing"); setIsPdfGenerating(false); return; } const container = sourceElement.cloneNode(true); container.style.width = '700px'; container.style.padding = '40px'; container.style.background = 'white'; container.style.position = 'fixed'; container.style.left = '-9999px'; container.style.top = '0'; const header = document.createElement('div'); header.innerHTML = '<h1 style="color:#0e7490; font-size:24px; font-weight:bold; margin-bottom:20px; border-bottom: 2px solid #0e7490; padding-bottom:10px;">PadhaiSetu Solution</h1>'; container.insertBefore(header, container.firstChild); document.body.appendChild(container); await new Promise(r => setTimeout(r, 500)); const canvas = await window.html2canvas(container, { scale: 2, useCORS: true, windowWidth: 1400 }); const imgData = canvas.toDataURL('image/jpeg', 0.95); const pdf = new jsPDF('p', 'mm', 'a4'); const imgWidth = 210; const pageHeight = 297; const imgHeight = (canvas.height * imgWidth) / canvas.width; let heightLeft = imgHeight; let position = 0; pdf.addImage(imgData, 'JPEG', 0, position, imgWidth, imgHeight); heightLeft -= pageHeight; while (heightLeft > 0) { position = heightLeft - imgHeight; pdf.addPage(); pdf.addImage(imgData, 'JPEG', 0, position, imgWidth, imgHeight); heightLeft -= pageHeight; } const pageCount = pdf.internal.getNumberOfPages(); pdf.setPage(pageCount); pdf.setTextColor(150); pdf.setFontSize(10); pdf.text("Generated by padhaisetu.in", 10, pageHeight - 10); pdf.save('PadhaiSetu_Solution.pdf'); document.body.removeChild(container); setIsPdfGenerating(false); } catch (e) { console.error(e); showToast("PDF Error. Try again."); setIsPdfGenerating(false); } };
+          
+          const stopAllAudio = (resetState = true) => { 
+              interactionIdRef.current += 1; 
+              if (audioRef.current) { 
+                audioRef.current.pause(); 
+                audioRef.current = null; 
+              } 
+              window.speechSynthesis.cancel(); 
+              setPlayingMessageId(null); 
+              setIsAudioLoading(false); 
+              processingRef.current = false; 
+              if (recordingTimeoutRef.current) clearTimeout(recordingTimeoutRef.current); 
+              if (mediaRecorderRef.current && mediaRecorderRef.current.state === 'recording') { 
+                mediaRecorderRef.current.onstop = null; 
+                mediaRecorderRef.current.stop(); 
+              } 
+              if (streamRef.current) { 
+                streamRef.current.getTracks().forEach(t => t.stop()); 
+                streamRef.current = null; 
+              } 
+              if(resetState) setVoiceState('idle'); 
+          };
+          
+          // Voice Mode using Web Speech API
+          const startVoiceMode = () => {
+            if (processingRef.current) return;
+            stopAllAudio(false);
+            
+            const SpeechRecognition = window.SpeechRecognition || window.webkitSpeechRecognition;
+            if (!SpeechRecognition) {
+              showToast("Your browser does not support speech recognition.");
+              return;
+            }
+
+            const recognition = new SpeechRecognition();
+            recognition.continuous = false;
+            recognition.interimResults = false;
+            recognition.lang = detectLanguage(input || "");
+
+            setVoiceState('recording');
+            recognition.start();
+
+            recognition.onresult = (event) => {
+              const transcript = event.results[0][0].transcript;
+              setVoiceState('processing');
+              handleSend(transcript, true);
+            };
+
+            recognition.onerror = (event) => {
+              console.error("Speech recognition error", event.error);
+              setVoiceState('idle');
+              showToast("Try again or type your question.");
+            };
+
+            recognition.onend = () => {
+              if (voiceState === 'recording') setVoiceState('idle');
+            };
+          };
+          
+          const stopManual = () => { 
+              stopAllAudio(true); 
+              setIsVoiceMode(false); 
+          };
+          
+          // Browser TTS for messages
+          const speakMessage = (text, msgId = 'main') => {
+            if (playingMessageId === msgId) {
+              stopAllAudio(true);
+              return;
+            }
+            
+            stopAllAudio(false);
+            setPlayingMessageId(msgId);
+            setIsAudioLoading(true);
+            
+            if (isVoiceMode) setVoiceState('processing');
+            
+            const cleanText = cleanTextForTTS(text);
+            
+            window.speechSynthesis.cancel();
+            const u = new SpeechSynthesisUtterance(cleanText);
+            u.lang = detectLanguage(cleanText);
+            
+            // Voice emotion tuning based on selected voice
+            if (selectedVoice === 'Aoede') { 
+              u.pitch = 1.1; u.rate = 1.0; 
+            } else if (selectedVoice === 'Fenrir') { 
+              u.pitch = 0.9; u.rate = 1.05; 
+            } else if (selectedVoice === 'Iapetus') { 
+              u.pitch = 1.0; u.rate = 1.15; 
+            } else if (selectedVoice === 'Orus') { 
+              u.pitch = 0.7; u.rate = 0.9; 
+            }
+            
+            const currentId = interactionIdRef.current;
+            u.onstart = () => {
+              setVoiceState('speaking');
+              setIsAudioLoading(false);
+            };
+            
+            u.onend = () => {
+              if (currentId === interactionIdRef.current) {
+                setVoiceState('idle');
+                setPlayingMessageId(null);
+                processingRef.current = false;
+                if (isVoiceMode) setTimeout(startVoiceMode, 500);
+              }
+            };
+            
+            window.speechSynthesis.speak(u);
+          };
+
+          // Swadhyay Solver
+          const handleSwadhyaySolve = async () => {
+              if (!swadhyayPaper) return;
+              setIsSolvingSwadhyay(true); setSwadhyaySolution('');
+              try {
+                  let instruction = `You are 'PadhaiSetu', an expert Teacher for Indian students. Solve the attached Question Paper.
+FORMAT RULES: 
+1. DO NOT WRITE any Header like 'Here is the solution'. START DIRECTLY with Question 1. 
+2. REPLICATE THE EXACT STRUCTURE (Section A, B etc). 
+3. Use this EXACT format for text: [Original Question Text] **Ans:** **[Answer Text]**
+4. IMPORTANT: Make sure ONLY the answer text is bold. 
+5. If the answer involves a ledger, journal entry, or comparison, YOU MUST USE A MARKDOWN TABLE.
+6. DETECT THE EXACT LANGUAGE OF THE PAPER (Gujarati, Hindi, English). PROVIDE THE ENTIRE SOLUTION IN THAT SAME LANGUAGE AND SCRIPT.`;
+                  
+                  let payloadParts = [{ text: instruction }];
+                  
+                  if (swadhyayPaper.type === 'image') {
+                      // For images, send base64
+                      let base64Data = swadhyayPaper.data;
+                      if (base64Data.includes(',')) base64Data = base64Data.split(',')[1];
+                      payloadParts.push({ inlineData: { data: base64Data, mimeType: swadhyayPaper.mime || 'image/jpeg' } });
+                      payloadParts.push({ text: "Solve this question paper completely and accurately." });
+                  } else {
+                      // For text, send directly
+                      payloadParts.push({ text: swadhyayPaper.data });
+                  }
+                  
+                  const response = await callBackendAI({
+                      mode: 'text',
+                      contents: [{ parts: payloadParts }]
+                  });
+                  
+                  const text = parseAIResponse(response);
+                  setSwadhyaySolution(text);
+                  
+                  if (user) { 
+                      const docRef = doc(db, 'artifacts', appId, 'users', user.uid, 'profile', 'main'); 
+                      await updateDoc(docRef, { earnings: increment(10), uploads: increment(1) }); 
+                      const historyPaper = { name: swadhyayPaper.name, type: swadhyayPaper.type }; 
+                      await addDoc(collection(db, 'artifacts', appId, 'users', user.uid, 'swadhyay'), { 
+                          title: "Solved Paper", 
+                          solution: text, 
+                          paperMetadata: historyPaper, 
+                          updatedAt: serverTimestamp() 
+                      }); 
+                  }
+              } catch (e) { 
+                  console.error(e); 
+                  setSwadhyaySolution("Error processing paper. Please try again."); 
+                  setIsSolvingSwadhyay(false); 
+              }
+              setIsSolvingSwadhyay(false);
+          };
+
+          // Handle Send (Chat)
+          const handleSend = async (textInput, isVoice = false) => { 
+            if (!textInput && !attachedFile) return; 
+            const currentId = interactionIdRef.current; 
+            let sessionId = currentSessionId || Date.now().toString(); 
+            if (!currentSessionId) setCurrentSessionId(sessionId); 
+            
+            const userMsg = { 
+                role: 'user', 
+                content: textInput || "Sent image", 
+                file: attachedFile || null 
+            }; 
+            
+            if (!isVoiceMode) { 
+                setMessages(prev => [...prev, userMsg]); 
+                if (!isVoice) setInput(''); 
+                setMessages(prev => [...prev, { role: 'ai', content: 'Thinking...', isLoading: true }]); 
+            } 
+            
+            saveChatToFirestore([...messages, userMsg], sessionId); 
+            setAttachedFile(null); 
+            
+            try { 
+                const historyText = messages.slice(-6).map(m => `${m.role === 'user' ? 'Student' : 'PadhaiSetu'}: ${m.content}`).join('\n');
+                let sysPrompt = getPersonaInstruction(selectedVoice, userProfile);
+                
+                let payloadParts = [];
+                
+                if (attachedFile && attachedFile.type === 'image') { 
+                    // Image + text
+                    const base64Data = attachedFile.data.includes(',') ? attachedFile.data.split(',')[1] : attachedFile.data;
+                    payloadParts.push({ inlineData: { data: base64Data, mimeType: attachedFile.mime || "image/jpeg" } });
+                    payloadParts.push({ text: textInput || "Explain this image educationally in the user's language." });
+                } else if (textInput) { 
+                    // Text only
+                    payloadParts.push({ text: textInput });
+                }
+                
+                payloadParts.unshift({ text: `Chat History so far:\n${historyText}\n\nCurrent User Input:\n` });
+                
+                const response = await callBackendAI({
+                    mode: 'text',
+                    contents: [{ parts: payloadParts }],
+                    systemInstruction: { parts: [{ text: sysPrompt }] }
+                });
+
+                const responseText = parseAIResponse(response);
+                
+                if (currentId !== interactionIdRef.current) return; 
+                
+                const aiMsg = { role: 'ai', content: responseText, isRestored: true }; 
+                setMessages(prev => { 
+                    const newArr = prev.filter(m => !m.isLoading && m !== userMsg); 
+                    return [...newArr, userMsg, aiMsg]; 
+                }); 
+                
+                let customTitle = null; 
+                if (!currentSessionId && textInput) customTitle = await generateSmartTitle(textInput); 
+                saveChatToFirestore([...messages, userMsg, aiMsg], sessionId, customTitle); 
+                
+                if (isVoice) speakMessage(responseText, 'voice-mode'); 
+                
+            } catch (e) { 
+                console.error("Chat Error", e); 
+                if (currentId !== interactionIdRef.current) return; 
+                setMessages(prev => { 
+                    const newArr = prev.filter(m => !m.isLoading); 
+                    return [...newArr, { role: 'ai', content: "Error. Try again." }]; 
+                }); 
+                if(isVoice) speakMessage("Error occurred.", 'error'); 
+            } 
+          };
+
+          // Show initialization error
+          if (initError) {
+            return (
+              <div className="min-h-screen bg-red-50 p-8 text-center">
+                <h1 className="text-2xl font-bold text-red-700 mb-4">Initialization Error</h1>
+                <p className="text-gray-700 mb-4">{initError}</p>
+                <button 
+                  onClick={() => window.location.reload()} 
+                  className="px-4 py-2 bg-red-600 text-white rounded"
+                >
+                  Reload Page
+                </button>
+              </div>
+            );
+          }
+
+          if (profileLoading) {
+            return (
+              <div className="h-screen flex items-center justify-center bg-white">
+                <div className="text-center">
+                  <div className="w-16 h-16 border-4 border-cyan-500 border-t-transparent rounded-full animate-spin mx-auto mb-4"></div>
+                  <p className="text-gray-600">Loading PadhaiSetu...</p>
+                </div>
+              </div>
+            );
+          }
+          
+          if (!user) return <LoginScreen onLogin={handleLogin} onAnonLogin={handleAnonLogin} />;
+          if (!userProfile) return <Onboarding onSave={saveProfile} />;
+
+          return (
+            <div className="flex h-screen bg-white font-sans text-gray-800 overflow-hidden">
+              <Sidebar 
+                isOpen={isSidebarOpen} 
+                onClose={() => setIsSidebarOpen(false)} 
+                user={user} 
+                userProfile={userProfile} 
+                activeTab={activeTab} 
+                setActiveTab={setActiveTab} 
+                onLogout={() => signOut(auth)} 
+                onUpgrade={() => setShowUpgradeModal(true)} 
+                chatHistory={chatHistory} 
+                swadhyayHistory={swadhyayHistory} 
+                onSelectChat={loadChat} 
+                onSelectSwadhyay={loadSwadhyay} 
+                onDeleteChat={requestDelete} 
+                onDeleteSwadhyay={requestDelete} 
+                onNewChat={startNewChat} 
+                currentSessionId={currentSessionId} 
+                activeView={activeTab} 
+                smartClassHistory={smartClassHistory} 
+                onSelectSmartClass={loadSmartClass} 
+                onDeleteSmartClass={requestDelete}
+              />
+              <div className="flex-1 flex flex-col h-full relative">
+                <Header 
+                  onMenu={() => setIsSidebarOpen(true)} 
+                  isPro={userProfile?.isPro} 
+                  voice={selectedVoice} 
+                  setVoice={setSelectedVoice} 
+                  onSwadhyayClick={() => setActiveTab('swadhyay')}
+                />
+                
+                {activeTab === 'chat' && (
+                    <>
+                        <div className="flex-1 overflow-y-auto p-4 space-y-6 pb-24 scroll-smooth" ref={chatContainerRef} onScroll={handleScroll}>
+                            {messages.length === 0 && <EmptyState name={user.displayName} onVoiceStart={() => { setIsVoiceMode(true); setTimeout(startVoiceMode, 500); }} />}
+                            {messages.map((msg, idx) => (
+                                <MessageBubble 
+                                    key={idx} 
+                                    msg={msg} 
+                                    isPlaying={playingMessageId === `msg-${idx}`} 
+                                    isLoading={isAudioLoading && playingMessageId === `msg-${idx}`} 
+                                    onSpeak={() => speakMessage(cleanTextForTTS(msg.content), `msg-${idx}`)} 
+                                    onViewImage={setViewImage}
+                                />
+                            ))}
+                            <div ref={messagesEndRef} />
+                        </div>
+                        {showScrollBtn && 
+                            <button onClick={scrollToBottom} className="absolute bottom-24 right-6 bg-white p-3 rounded-full shadow-lg border border-gray-200 z-10 hover:bg-gray-50 transition animate-in slide-in-from-bottom-2">
+                                <ArrowDown className="w-5 h-5 text-gray-600"/>
+                            </button>
+                        }
+                        <InputArea 
+                            input={input} 
+                            setInput={setInput} 
+                            onSend={() => handleSend(input)} 
+                            attachedFile={attachedFile} 
+                            setAttachedFile={setAttachedFile} 
+                            fileRef={fileInputRef} 
+                            onVoiceMode={() => { setIsVoiceMode(true); setTimeout(startVoiceMode, 500); }} 
+                        />
+                    </>
+                )}
+                
+                {activeTab === 'swadhyay' && (
+                    <div className="flex-1 overflow-y-auto p-6 bg-gray-50 relative">
+                        <div className="sticky top-0 z-50 flex justify-end mb-2">
+                            <button onClick={handleExitSwadhyay} className="bg-white/90 p-2 rounded-full shadow-md text-red-500 hover:bg-red-50 border border-gray-200 backdrop-blur-sm transition-all transform active:scale-95" title="Close Solver">
+                                <X className="w-6 h-6"/>
+                            </button>
+                        </div>
+                        <div className="max-w-4xl mx-auto">
+                            <h2 className="text-2xl font-bold mb-6 flex items-center gap-2 text-cyan-800 border-b pb-4">
+                                <div className="bg-cyan-100 p-2 rounded-full"><Upload className="w-6 h-6 text-cyan-600"/></div>
+                                Swadhyay Paper / Question Paper Solver
+                            </h2>
+                            {!swadhyaySolution ? (
+                                <>
+                                    <div className="bg-white p-10 rounded-3xl shadow-lg border-2 border-dashed border-cyan-200 mb-8 relative group cursor-pointer hover:border-cyan-500 hover:bg-cyan-50/20 transition-all flex flex-col items-center justify-center min-h-[250px]" onClick={() => paperInputRef.current.click()}>
+                                        <div className="bg-blue-50 p-5 rounded-full group-hover:bg-blue-100 transition shadow-sm mb-4">
+                                            <ScanLine className="w-12 h-12 text-blue-500 animate-pulse"/>
+                                        </div>
+                                        <h3 className="text-xl font-bold text-gray-800">Scan Question Paper</h3>
+                                        <p className="text-sm text-gray-500 mt-1">Upload PDF, Image or Text file</p>
+                                        {swadhyayPaper && 
+                                            <div className="mt-6 px-5 py-2 bg-green-100 text-green-800 rounded-full flex items-center gap-2 font-bold shadow-sm animate-in zoom-in">
+                                                <FileCheck className="w-5 h-5"/>{swadhyayPaper.name} Ready
+                                            </div>
+                                        }
+                                        <input type="file" ref={paperInputRef} className="hidden" accept=".jpg,.jpeg,.png,.pdf,.txt" onChange={e => handleFileUpload(e, setSwadhyayPaper)}/>
+                                    </div>
+                                    <button onClick={handleSwadhyaySolve} disabled={!swadhyayPaper || isSolvingSwadhyay} className="w-full bg-gradient-to-r from-cyan-600 to-blue-600 text-white py-4 rounded-xl font-bold text-lg shadow-xl hover:shadow-cyan-500/40 transition-all disabled:opacity-50 flex items-center justify-center gap-3 transform active:scale-95">
+                                        {isSolvingSwadhyay ? <><Loader2 className="w-6 h-6 animate-spin"/> Analyzing Paper...</> : <><Sparkles className="w-6 h-6"/> Solve Now</>}
+                                    </button>
+                                </>
+                            ) : (
+                                <div className="mt-8 bg-white rounded-2xl shadow-xl border border-cyan-100 overflow-hidden animate-in fade-in slide-in-from-bottom-4">
+                                    <div id="solution-print-area" className="p-10 bg-white relative">
+                                        <h3 className="text-2xl font-bold text-cyan-800 border-b-2 border-cyan-500 pb-4 mb-6">PadhaiSetu Solution</h3>
+                                        <div className="prose max-w-none text-gray-800 font-sans leading-relaxed text-lg">
+                                            <SmartText content={swadhyaySolution} />
+                                        </div>
+                                    </div>
+                                    <div className="p-6 bg-gray-50 border-t flex justify-end gap-4 no-print">
+                                        <button onClick={generatePDF} disabled={isPdfGenerating} className="flex items-center gap-2 bg-white text-red-600 font-bold px-6 py-3 rounded-xl border border-gray-200 shadow-sm hover:shadow-md transition transform hover:-translate-y-0.5">
+                                            {isPdfGenerating ? <Loader2 className="w-5 h-5 animate-spin"/> : <Download className="w-5 h-5"/>} Download PDF
+                                        </button>
+                                        <button onClick={() => speakMessage(cleanTextForTTS(swadhyaySolution), 'sol')} className="flex items-center gap-2 text-cyan-600 font-medium">
+                                            {playingMessageId==='sol' ? (isAudioLoading ? <Loader2 className="w-5 h-5 animate-spin"/> : <Activity className="w-5 h-5 animate-pulse"/>) : <Volume2 className="w-5 h-5"/>} Listen
+                                        </button>
+                                    </div>
+                                </div>
+                            )}
+                        </div>
+                    </div>
+                )}
+                
+                {activeTab === 'earnings' && 
+                    <div className="flex-1 p-6 flex flex-col items-center justify-center text-gray-500 relative">
+                        <button onClick={() => setActiveTab('chat')} className="absolute top-6 right-6 p-2 bg-gray-100 rounded-full"><X/></button>
+                        <TrendingUp className="w-16 h-16 text-gray-300 mb-4"/>
+                        <h3 className="text-xl font-bold">Earnings Dashboard</h3>
+                        <p>Coming Soon</p>
+                    </div>
+                }
+                
+                {activeTab === 'visuals' && 
+                    <SmartClass 
+                        onBack={() => setActiveTab('chat')} 
+                        speak={speakMessage} 
+                        stopAudio={stopAllAudio} 
+                        userProfile={userProfile} 
+                        showToast={showToast} 
+                        selectedVoice={selectedVoice} 
+                        onSave={saveSmartClassSession} 
+                        initialSession={currentSmartSession}
+                    />
+                }
+              </div>
+              
+              {/* Voice Mode UI */}
+              {isVoiceMode && 
+                <div className="fixed inset-0 bg-black/95 z-50 flex flex-col items-center justify-between p-8 animate-in fade-in duration-300 backdrop-blur-xl">
+                    <div className="w-full flex justify-between text-white/80">
+                        <div className="flex items-center gap-2">
+                            <Sparkles className="w-5 h-5 text-cyan-400"/>
+                            <span>Voice Mode • {AI_VOICES.find(v=>v.id===selectedVoice)?.name.split(' ')[0]}</span>
+                        </div>
+                        <button onClick={stopManual} className="p-2 bg-white/10 rounded-full hover:bg-white/20">
+                            <X className="w-6 h-6"/>
+                        </button>
+                    </div>
+                    <div className="flex-1 flex items-center justify-center">
+                        <div className={`w-40 h-40 rounded-full transition-all duration-500 flex items-center justify-center ${
+                            voiceState==='recording' ? 'bg-blue-600 scale-110 shadow-lg shadow-blue-500/50' : 
+                            voiceState==='speaking' ? 'bg-purple-600 scale-125 shadow-lg shadow-purple-500/50' : 
+                            voiceState==='processing' ? 'bg-white scale-90 animate-pulse' : 'bg-gray-800'
+                        }`}>
+                            {voiceState==='processing' ? <Loader2 className="w-12 h-12 text-black animate-spin"/> : 
+                             voiceState==='recording' ? <Mic className="w-12 h-12 text-white"/> : 
+                             voiceState==='speaking' ? <Volume2 className="w-12 h-12 text-white"/> : 
+                             <Mic className="w-12 h-12 text-gray-400"/>}
+                        </div>
+                    </div>
+                    <div className="text-center mb-12">
+                        <p className="text-2xl font-bold text-white mb-2">
+                            {voiceState==='recording' ? "Listening..." : 
+                             voiceState==='processing' ? "Thinking..." : 
+                             voiceState==='speaking' ? "Speaking..." : "Tap Mic to Chat"}
+                        </p>
+                    </div>
+                    <div className="flex justify-center pb-8">
+                        {voiceState==='processing' || voiceState==='speaking' ? 
+                            <button onClick={stopManual} className="p-8 rounded-full bg-red-500/20 text-red-400 border border-red-500/50">
+                                <StopCircle className="w-10 h-10"/>
+                            </button> : 
+                            <button onClick={startVoiceMode} className="p-8 rounded-full bg-white text-black hover:scale-105 transition">
+                                <Mic className="w-10 h-10"/>
+                            </button>
+                        }
+                    </div>
+                </div>
+              }
+              
+              {/* Modals */}
+              {showUpgradeModal && 
+                <UpgradeModal onClose={() => setShowUpgradeModal(false)} onUpgrade={() => { setUserProfile({...userProfile, isPro: true}); setShowUpgradeModal(false); }} />
+              }
+              {chatToDelete && 
+                <DeleteModal isOpen={!!chatToDelete} onClose={() => setChatToDelete(null)} onConfirm={confirmDelete} />
+              }
+              {toastMsg && 
+                <Toast message={toastMsg} onClose={() => setToastMsg(null)} />
+              }
+              <ImageViewer src={viewImage} onClose={() => setViewImage(null)} />
+            </div>
+          );
+        }
+
+        // Render the app
+        try {
+          console.log("🎨 Rendering App...");
+          const rootElement = document.getElementById('root');
+          console.log("Root element:", rootElement);
+          
+          if (!rootElement) {
+            throw new Error("Root element not found!");
+          }
+          
+          const root = createRoot(rootElement);
+          root.render(
+            <ErrorBoundary>
+              <App />
+            </ErrorBoundary>
+          );
+          console.log("✅ Render complete");
+          
+          // Hide fallback
+          document.getElementById('fallback').style.display = 'none';
+          
+        } catch (error) {
+          console.error("💥 Render error:", error);
+          document.getElementById('fallback').style.display = 'block';
+          document.getElementById('fallback').innerHTML = `
+            <h2 style="color: red;">Render Failed</h2>
+            <pre style="background: #f0f0f0; padding: 10px; text-align: left;">${error.toString()}</pre>
+          `;
+        }
+    </script>
+</body>
+</html>
